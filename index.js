@@ -1,16 +1,9 @@
+require('./lib/util/patch');
 var net = require('net');
 var tls = require('tls');
-var res = require('http').OutgoingMessage.prototype;
 
 var ver = process.version.substring(1).split('.');
-var setHeader = res.setHeader;
-
-process.emitWarning = function() {};
-res.setHeader = function(field, val){
-  try {
-    return setHeader.call(this, field, val);
-  } catch(e) {}
-};
+var PROD_RE = /(^|\|)prod(uction)?($|\|)/;
 
 if (ver[0] >= 7 && ver[1] >= 7) {
   var connect = net.Socket.prototype.connect;
@@ -26,7 +19,8 @@ if (ver[0] >= 7 && ver[1] >= 7) {
 }
 
 //see: https://github.com/joyent/node/issues/9272
-process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '0';
+var env = process.env || '';
+env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 if (typeof tls.checkServerIdentity == 'function') {
   var checkServerIdentity = tls.checkServerIdentity;
   tls.checkServerIdentity = function() {
@@ -36,6 +30,9 @@ if (typeof tls.checkServerIdentity == 'function') {
       return err;
     }
   };
+}
+if (env.WHISTLE_PLUGIN_EXEC_PATH) {
+  env.PFORK_EXEC_PATH = env.WHISTLE_PLUGIN_EXEC_PATH;
 }
 
 function isPipeName(s) {
@@ -75,6 +72,13 @@ module.exports = function(options, callback) {
   if (typeof options === 'function') {
     callback = options;
     options = null;
+  }
+  if (options && options.debugMode) {
+    if (PROD_RE.test(options.mode)) {
+      options.debugMode = false;
+    } else {
+      env.PFORK_MODE = 'bind';
+    }
   }
   require('./lib/config').extend(options);
   return require('./lib')(callback);

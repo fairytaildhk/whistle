@@ -5,6 +5,7 @@ var util = require('./util');
 var CopyBtn = require('./copy-btn');
 var ExpandCollapse = require('./expand-collapse');
 
+
 var Properties = React.createClass({
   getInitialState: function() {
     return { viewSource: false };
@@ -16,6 +17,7 @@ var Properties = React.createClass({
     var props = this.props;
     var sourceText = props.enableViewSource;
     var viewSource = this.state.viewSource;
+    var onHelp = props.onHelp;
     var modal = props.modal || {};
     var title = props.title || {};
     var keys = Object.keys(modal);
@@ -28,13 +30,22 @@ var Properties = React.createClass({
           : name + ': ' + util.toString(value)
       );
     }).join('\n');
+    if (this.textStr !== sourceText) {
+      this.textStr = sourceText;
+      try {
+        this.jsonStr = JSON.stringify(modal, null, '  ');
+      } catch (e) {
+        this.jsonStr = undefined;
+      }
+    }
 
     return (
       <div className={ 'w-properties-wrap ' + (viewSource ? 'w-properties-view-source ' : 'w-properties-view-parsed ') + (props.hide ? 'hide' : '') }>
         { sourceText ? 
           <div className="w-textarea-bar">
-            <CopyBtn value={sourceText} />
-            <a onClick={this.toggle} href="javascript:;">{ viewSource ? 'ViewParsed' : 'ViewSource' }</a>
+            <CopyBtn value={sourceText} name="AsText" />
+            {this.jsonStr ? <CopyBtn value={this.jsonStr} name="AsJSON" /> : undefined }
+            <a onClick={this.toggle}>{ viewSource ? 'Form' : 'Text' }</a>
           </div> : undefined
         }
         { sourceText ? (<pre className="w-properties-source">
@@ -51,7 +62,10 @@ var Properties = React.createClass({
                       val = util.toString(val);
                       return (
                         <tr key={i} className={val ? undefined : 'w-no-value'}>
-                          <th>{name && name.length >= 2100 ? <ExpandCollapse text={name} /> : name}</th>
+                          <th>
+                            {onHelp ? <span data-name={name} onClick={onHelp} className="glyphicon glyphicon-question-sign"></span> : undefined}
+                            {name && name.length >= 2100 ? <ExpandCollapse text={name} /> : name}
+                          </th>
                           <td><pre>{val && val.length >= 2100 ? <ExpandCollapse text={val} /> : val}</pre></td>
                         </tr>
                       );
@@ -61,7 +75,10 @@ var Properties = React.createClass({
                 value = util.toString(value);
                 return (
                   <tr key={name} title={title[name]} className={value ? undefined : 'w-no-value'}>
-                    <th>{name && name.length >= 2100 ? <ExpandCollapse text={name} /> : name}</th>
+                    <th>
+                      {onHelp ? <span data-name={name} onClick={onHelp} className="glyphicon glyphicon-question-sign"></span> : undefined}
+                      {name && name.length >= 2100 ? <ExpandCollapse text={name} /> : name}
+                    </th>
                     <td><pre>{value && value.length >= 2100 ? <ExpandCollapse text={value} /> : value}</pre></td>
                   </tr>
                 );

@@ -6,7 +6,17 @@
 	# 通过替换的方式修改响应头
 	pattern headerReplace://res.header-name:pattern3=replacement3
 
-pattern参见[匹配模式](../pattern.html)，更多模式请参考[配置方式](../mode.html)。
+	# 通过替换的方式修改trailers
+	pattern headerReplace://trailer.header-name:pattern4=replacement4
+
+	# 也可以
+	``` replacement.json
+	res.header-name:pattern3: replacement3
+	trailer.header-name:pattern4: replacement4
+	```
+	pattern headerReplace://{replacement.json}
+
+版本要求：`>= v2.5.18`，pattern参见[匹配模式](../pattern.html)，更多模式请参考[配置方式](../mode.html)。
 
 例子：
 

@@ -1,5 +1,6 @@
 var React = require('react');
 var ReactDOM = require('react-dom');
+var $ = require('jquery');
 var util = require('./util');
 var FilterInput = require('./filter-input');
 var DropDown = require('./dropdown');
@@ -47,14 +48,36 @@ var FrameList = React.createClass({
     return {};
   },
   onFilterChange: function(keyword) {
-    this.props.modal.search(keyword);
-    this.setState({ keyword: keyword.trim() });
+    var self = this;
+    self.props.modal.search(keyword);
+    clearTimeout(self.filterTimer);
+    self.filterTimer = setTimeout(function() {
+      self.filterTimer = null;
+      self.setState({ keyword: keyword.trim() });
+    }, 600);
   },
   componentDidMount: function() {
-    events.on('autoRefreshFrames', this.autoRefresh);
+    var self = this;
+    events.on('autoRefreshFrames', self.autoRefresh);
+    events.on('composeFrameId', function(e, id) {
+      var modal = id && self.props.modal;
+      var list = modal && modal.list;
+      if (list) {
+        for (var i = 0, len = list.length; i < len; i++) {
+          var frame = list[i];
+          if (frame && frame.frameId === id) {
+            return events.trigger('composeFrame', frame);
+          }
+        }
+      }
+    });
+  },
+  shouldComponentUpdate: function() {
+    clearTimeout(this.filterTimer);
+    return true;
   },
   onDoubleClick: function() {
-    events.trigger('showFrameTextView');
+    events.trigger('showFrameOverview');
   },
   componentWillUpdate: function() {
     this.atBottom = this.shouldScrollToBottom();
@@ -153,8 +176,12 @@ var FrameList = React.createClass({
     this.changeStatus(reqData, option);
   },
   onClear: function(e) {
-    if ((e.ctrlKey || !e.metaKey) && e.keyCode === 88) {
-      this.clear();
+    if (e.ctrlKey || e.metaKey) {
+      if (e.keyCode === 88) {
+        this.clear();
+      } else if (e.keyCode === 82) {
+        this.replay();
+      }
     }
   },
   shouldScrollToBottom: function() {
@@ -196,6 +223,13 @@ var FrameList = React.createClass({
       return this.autoRefresh();
     }
   },
+  onDragStart: function(e) {
+    var dataId = $(e.target).closest('li').attr('data-id');
+    if (!dataId) {
+      return;
+    }
+    e.dataTransfer.setData('frameDataId', dataId);
+  },
   render: function() {
     var self = this;
     var props = self.props;
@@ -212,19 +246,19 @@ var FrameList = React.createClass({
       <div className="w-frames-action">
         <RecordBtn ref="recordBtn" onClick={this.handleAction} disabledRecord={reqData.closed} />
         <a onClick={self.clear} className="w-remove-menu"
-          href="javascript:;" draggable="false">
+          draggable="false">
           <span className="glyphicon glyphicon-remove"></span>Clear
         </a>
         <a onClick={self.replay} className={'w-remove-menu' + ((!activeItem || reqData.closed) ? ' w-disabled' : '')}
-          href="javascript:;" draggable="false">
+          draggable="false">
           <span className="glyphicon glyphicon-repeat"></span>Replay
         </a>
         <a onClick={self.compose} className={'w-remove-menu' + (activeItem ? '' : ' w-disabled')}
-          href="javascript:;" draggable="false">
+          draggable="false">
           <span className="glyphicon glyphicon-edit"></span>Compose
         </a>
         <a onClick={self.abort} className={'w-remove-menu' + (reqData.closed ? ' w-disabled' : '')}
-          href="javascript:;" draggable="false">
+          draggable="false">
           <span className="glyphicon glyphicon-ban-circle"></span>Abort
         </a>
         <DropDown
@@ -245,7 +279,7 @@ var FrameList = React.createClass({
         onKeyDown={this.onClear}
         style={{background: keyword ? '#ffffe0' : undefined}}
         onScroll={self.shouldScrollToBottom} ref={self.setContainer} className="fill w-frames-list">
-        <ul ref={self.setContent}>
+        <ul ref={self.setContent} onDragStart={self.onDragStart}>
           {list.map(function(item) {
             var statusClass = '';
             if (item.closed || item.err || item.isError) {
@@ -256,7 +290,7 @@ var FrameList = React.createClass({
               } else {
                 statusClass = ' w-connection-error';
               }
-              item.title = item.title || 'Date: ' + new Date(parseInt(item.frameId, 10)).toLocaleString();
+              item.title = item.title || 'Date: ' + util.toLocaleString(new Date(parseInt(item.frameId, 10)));
             }
             if (item.data == null) {
               item.data = util.getBody(item, true);
@@ -265,7 +299,7 @@ var FrameList = React.createClass({
               }
             }
             if (!item.title && !item.closed) {
-              item.title = 'Date: ' + new Date(parseInt(item.frameId, 10)).toLocaleString()
+              item.title = 'Date: ' + util.toLocaleString(new Date(parseInt(item.frameId, 10)))
                + '\nFrom: ' + (item.isClient ? 'Client' : 'Server');
               if (item.opcode) {
                 item.title += '\nOpcode: ' + item.opcode;
@@ -293,7 +327,9 @@ var FrameList = React.createClass({
             }
             return (
               <li
+                draggable
                 key={item.frameId}
+                data-id={item.frameId}
                 title={item.title}
                 style={{display: item.hide ? 'none' : undefined}}
                 onClick={function() {
@@ -301,7 +337,7 @@ var FrameList = React.createClass({
                 }}
                 onDoubleClick={self.onDoubleClick}
                 className={(item.isClient ? 'w-frames-send' : '') + (item.ignore ? ' w-frames-ignore' : '')
-                  + (item.active ? '  w-frames-selected' : '') + statusClass}>
+                  + (item.active ? '  w-frames-selected' : '') + (item.opcode == 2 ? ' w-frames-bin' : '') + statusClass}>
                 <span className={'glyphicon glyphicon-' + icon}></span>
                 {item.data}
               </li>

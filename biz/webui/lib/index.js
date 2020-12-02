@@ -7,10 +7,13 @@ var parseurl = require('parseurl');
 var bodyParser = require('body-parser');
 var crypto = require('crypto');
 var cookie = require('cookie');
+var fs = require('fs');
+var zlib = require('zlib');
 var htdocs = require('../htdocs');
 var handleWeinreReq = require('../../weinre');
 var setProxy = require('./proxy');
 var getRootCAFile = require('../../../lib/https/ca').getRootCAFile;
+var config = require('../../../lib/config');
 
 var PARSE_CONF = { extended: true, limit: '3mb'};
 var UPLOAD_PARSE_CONF = { extended: true, limit: '30mb'};
@@ -20,15 +23,17 @@ var uploadUrlencodedParser = bodyParser.urlencoded(UPLOAD_PARSE_CONF);
 var uploadJsonParser = bodyParser.json(UPLOAD_PARSE_CONF);
 var GET_METHOD_RE = /^get$/i;
 var WEINRE_RE = /^\/weinre\/.*/;
-var DONT_CHECK_PATHS = ['/cgi-bin/server-info', '/cgi-bin/show-host-ip-in-res-headers',
-                        '/cgi-bin/composer', '/cgi-bin/socket/data', '/preview.html',
-                        '/cgi-bin/socket/abort', '/cgi-bin/socket/change-status',
-                        '/cgi-bin/sessions/export', '/cgi-bin/sessions/import',
-                        '/cgi-bin/lookup-tunnel-dns', '/cgi-bin/rootca', '/cgi-bin/log/set'];
+var ALLOW_PLUGIN_PATHS = ['/cgi-bin/rules/list2', '/cgi-bin/values/list2', '/cgi-bin/get-custom-certs-info'];
+var DONT_CHECK_PATHS = ['/cgi-bin/server-info', '/cgi-bin/plugins/is-enable', '/preview.html', '/cgi-bin/rootca', '/cgi-bin/log/set'];
+var GUEST_PATHS = ['/cgi-bin/composer', '/cgi-bin/socket/data', '/cgi-bin/abort', '/cgi-bin/socket/abort',
+  '/cgi-bin/socket/change-status', '/cgi-bin/sessions/export'];
 var PLUGIN_PATH_RE = /^\/(whistle|plugin)\.([^/?#]+)(\/)?/;
 var STATIC_SRC_RE = /\.(?:ico|js|css|png)$/i;
-var proxyEvent, util, config, pluginMgr, uiPortCookie;
+var UPLOAD_URLS = ['/cgi-bin/values/upload', '/cgi-bin/composer'];
+var proxyEvent, util, pluginMgr;
 var MAX_AGE = 60 * 60 * 24 * 3;
+var MENU_HTML = fs.readFileSync(path.join(__dirname, '../../../assets/menu.html'));
+var MENU_URL = '???_WHISTLE_PLUGIN_EXT_CONTEXT_MENU_' + config.port + '???';
 
 function doNotCheckLogin(req) {
   var path = req.path;
@@ -75,9 +80,6 @@ function verifyLogin(req, res, auth) {
       auth.authKey = 'whistle_v_lk_' + encodeURIComponent(auth.username);
     }
   }
-  if (!auth) {
-    return;
-  }
   var username = auth.username;
   var password = auth.password;
 
@@ -114,17 +116,27 @@ function checkAuth(req, res, auth) {
   return false;
 }
 
+app.disable('x-powered-by');
+
 app.use(function(req, res, next) {
   proxyEvent.emit('_request', req.url);
   var aborted;
-  req.on('error', abort).on('close', abort);
-  res.on('error', abort);
-  function abort() {
+  var abort = function() {
     if (!aborted) {
       aborted = true;
       res.destroy();
     }
-  }
+  };
+  req.on('error', abort).on('close', abort);
+  res.on('error', abort);
+  next();
+});
+
+if (typeof config.uiMiddleware === 'function') {
+  app.use(config.uiMiddleware);
+}
+
+app.use(function(req, res, next) {
   var referer = req.headers.referer;
   var options = parseurl(req);
   var path = options.path;
@@ -183,7 +195,7 @@ app.all('/cgi-bin/sessions/*', cgiHandler);
 app.all('/favicon.ico', function(req, res) {
   res.sendFile(htdocs.getImgFile('favicon.ico'));
 });
-app.all(PLUGIN_PATH_RE, function(req, res, next) {
+app.all(PLUGIN_PATH_RE, function(req, res) {
   var result = PLUGIN_PATH_RE.exec(req.url);
   var type = result[1];
   var name = result[2];
@@ -192,6 +204,26 @@ app.all(PLUGIN_PATH_RE, function(req, res, next) {
     : pluginMgr.getPluginByName(name);
   if (!plugin) {
     return res.status(404).send('Not Found');
+  }
+  if (req.url.indexOf(MENU_URL) !== -1) {
+    res.type('html');
+    res.write(plugin[util.PLUGIN_MENU_CONFIG]);
+    res.write(MENU_HTML);
+    var index = req.path.indexOf('/', 1);
+    if (index === -1) {
+      res.end();
+    } else {
+      var filepath = req.path.substring(index + 1);
+      var reader = fs.createReadStream(path.join(plugin.path, filepath));
+      reader.on('error', function() {
+        if (reader) {
+          reader = null;
+          res.end();
+        }
+      });
+      reader.pipe(res);
+    }
+    return;
   }
   if (!slash) {
     return res.redirect(type + '.' + name + '/');
@@ -213,17 +245,21 @@ app.all(PLUGIN_PATH_RE, function(req, res, next) {
 });
 
 app.use(function(req, res, next) {
+  if (ALLOW_PLUGIN_PATHS.indexOf(req.path) !== -1) {
+    var name = req.headers[config.PROXY_ID_HEADER];
+    if (name) {
+      return pluginMgr.getPlugin(name + ':') ? next() : res.sendStatus(403);
+    }
+  }
   var authKey = config.authKey;
   if ((authKey && authKey === req.headers['x-whistle-auth-key'])
     || doNotCheckLogin(req)) {
     return next();
   }
-  if (req.headers[config.WEBUI_HEAD] && (req.path === '/' || req.path === '/index.html')) {
-    res.setHeader('Set-Cookie', uiPortCookie);
-  }
   var guestAuthKey = config.guestAuthKey;
   if (((guestAuthKey && guestAuthKey === req.headers['x-whistle-guest-auth-key'])
-    || verifyLogin(req, res)) && (!req.method || GET_METHOD_RE.test(req.method) || WEINRE_RE.test(req.path))) {
+    || verifyLogin(req, res)) && (!req.method || GET_METHOD_RE.test(req.method)
+    || WEINRE_RE.test(req.path) || GUEST_PATHS.indexOf(req.path) !== -1)) {
     return next();
   }
   var username = getUsername();
@@ -239,16 +275,16 @@ app.use(function(req, res, next) {
 });
 
 app.all('/cgi-bin/*', function(req, res, next) {
-  return req.path === '/cgi-bin/values/upload' ?
-    uploadUrlencodedParser(req, res, next) : urlencodedParser(req, res, next);
-});
-app.all('/cgi-bin/*', function(req, res, next) {
-  return req.path === '/cgi-bin/values/upload' ?
-    uploadJsonParser(req, res, next) : jsonParser(req, res, next);
-});
-app.all('/cgi-bin/*', cgiHandler);
+  req.isUploadReq = UPLOAD_URLS.indexOf(req.path) !== -1;
+  return req.isUploadReq ? uploadUrlencodedParser(req, res, next) : urlencodedParser(req, res, next);
+}, function(req, res, next) {
+  return req.isUploadReq ? uploadJsonParser(req, res, next) : jsonParser(req, res, next);
+}, cgiHandler);
 
 app.use('/preview.html', function(req, res, next) {
+  if (req.headers[config.INTERNAL_ID_HEADER] !== config.INTERNAL_ID) {
+    return res.status(404).end('Not Found');
+  }
   next();
   var index = req.path.indexOf('=') + 1;
   if (index) {
@@ -256,6 +292,38 @@ app.use('/preview.html', function(req, res, next) {
     res.set('content-type', 'text/html;charset=' + charset);
   }
 });
+if (!config.debugMode) {
+  var indexHtml = fs.readFileSync(htdocs.getHtmlFile('index.html'));
+  var indexJs = fs.readFileSync(htdocs.getJsFile('index.js'));
+  var jsETag = shasum(indexJs);
+  var gzipIndexJs = zlib.gzipSync(indexJs);
+  app.use('/js/index.js', function(req, res) {
+    if (req.headers['if-none-match'] === jsETag) {
+      return res.sendStatus(304);
+    }
+    var headers = {
+      'Content-Type': 'application/javascript; charset=utf-8',
+      'Cache-Control': 'public, max-age=300',
+      ETag: jsETag
+    };
+    if (util.canGzip(req)) {
+      headers['Content-Encoding'] = 'gzip';
+      res.writeHead(200, headers);
+      res.end(gzipIndexJs);
+    } else {
+      res.writeHead(200, headers);
+      res.end(indexJs);
+    }
+  });
+  var sendIndex = function(req, res) {
+    res.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8'
+    });
+    res.end(indexHtml);
+  };
+  app.get('/', sendIndex);
+  app.get('/index.html', sendIndex);
+}
 app.use(express.static(path.join(__dirname, '../htdocs'), {maxAge: 300000}));
 
 app.get('/', function(req, res) {
@@ -276,13 +344,8 @@ function init(proxy) {
     return;
   }
   proxyEvent = proxy;
-  config = proxy.config;
   pluginMgr = proxy.pluginMgr;
   util = proxy.util;
-  uiPortCookie = cookie.serialize('_whistleuipath_', config.port, {
-    expires: new Date(Date.now() + 10000),
-    maxAge: 10
-  });
   setProxy(proxy);
 }
 

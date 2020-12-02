@@ -128,6 +128,7 @@ var ServerLog = React.createClass({
       if (!toggleHide && !hide) {
         this.state.scrollToBottom = util.scrollAtBottom(this.container, this.content);
       }
+      clearTimeout(this.filterTimer);
       return true;
     }
     return false;
@@ -138,18 +139,21 @@ var ServerLog = React.createClass({
     }
   },
   onServerFilterChange: function(keyword) {
+    var self = this;
     keyword = keyword.trim();
-    this.keyword = keyword;
+    self.keyword = keyword;
     var serverKeyword = util.parseKeyword(keyword);
-    var logs = this.state.logs;
+    var logs = self.state.logs;
     util.filterLogList(logs, serverKeyword);
     if (!keyword) {
       var len = logs && (logs.length - MAX_COUNT);
       len > 9 && logs.splice(0, len);
     }
-    this.setState({
-      serverKeyword: serverKeyword
-    });
+    clearTimeout(self.filterTimer);
+    self.filterTimer = setTimeout(function() {
+      self.filterTimer = null;
+      self.setState({ serverKeyword: serverKeyword });
+    }, 600);
   },
   showNameInput: function(e) {
     var self = this;
@@ -244,11 +248,11 @@ var ServerLog = React.createClass({
           />
           <div className="w-textarea-bar">
             <a className="w-import" onClick={this.selectFile}
-              href="javascript:;" draggable="false">Import</a>
+              draggable="false">Import</a>
             <a className={'w-download' + (disabled ? ' w-disabled' : '')} onDoubleClick={disabled ? undefined : this.download}
-              onClick={disabled ? undefined : this.showNameInput} href="javascript:;" draggable="false">Export</a>
+              onClick={disabled ? undefined : this.showNameInput} draggable="false">Export</a>
             <RecordBtn onClick={this.handleAction} />
-            <a className={'w-clear' + (disabled ? ' w-disabled' : '')} onClick={disabled ? undefined : this.clearLogs} href="javascript:;" draggable="false">Clear</a>
+            <a className={'w-clear' + (disabled ? ' w-disabled' : '')} onClick={disabled ? undefined : this.clearLogs} draggable="false">Clear</a>
             <div onMouseDown={this.preventBlur}
               style={{display: this.state.showNameInput ? 'block' : 'none'}}
               className="shadow w-textarea-input"><input ref="nameInput"
@@ -274,7 +278,7 @@ var ServerLog = React.createClass({
         <div ref="svrContainer" className="fill w-detail-log-content">
           <ul ref="svrContent">
             {logs.map(function(log) {
-              var text = 'Date: ' + (new Date(log.date)).toLocaleString() + '\r\n' + log.text;
+              var text = 'Date: ' + util.toLocaleString(new Date(log.date)) + '\r\n' + log.text;
               var hide = (log.hide || (level && !hide && log.level !== level)) ? ' hide' : '';
               return (
                 <li key={log.id} title={log.level.toUpperCase()} className={'w-' + log.level + hide}>

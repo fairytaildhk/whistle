@@ -6,6 +6,8 @@
   </a>
 </p>
 
+> 建议及时[更新 whistle](https://wproxy.org/whistle/update.html) 和 [Node](https://nodejs.org/) 以确保获取最新特性、bug修复及性能优化。
+> 某些版本的 Node 存在 bug 可能导致 whistle 无法正常运行，具体版本参见issue：[#231](https://github.com/avwo/whistle/issues/231)
 
 # whistle
 [![NPM version](https://img.shields.io/npm/v/whistle.svg?style=flat-square)](https://npmjs.org/package/whistle)
@@ -18,17 +20,17 @@
 
 [README in English](README.md)
 
-whistle(读音`[ˈwɪsəl]`，拼音`[wēisǒu]`)是基于Node实现的跨平台抓包调试代理工具，有以下基本功能：
+whistle(读音 `[ˈwɪsəl]`，拼音 `[wēisǒu]` )是基于 Node 实现的跨平台抓包调试代理工具，有以下基本功能：
 
-1. 查看HTTP、HTTPS请求响应内容
-2. 查看WebSocket、Socket收发的帧数据
-3. 设置请求hosts、上游http/socks代理
-4. 修改请求url、方法、头部、内容
-5. 修改响应状态码、头部、内容，并支持本地替换
-6. 修改WebSocket或Socket收发的帧数据
-7. 内置调试移动端页面的weinre和log
-8. 作为HTTP代理或反向代理
-9. 支持用Node编写插件扩展功能
+1. 查看 HTTP、HTTPS、HTTP2、WebSocket、TCP 请求响应数据
+2. 修改 HTTP、HTTPS、HTTP2、WebSocket、TCP 请求响应数据
+	- 修改请求 url、方法、头部、内容等
+	- 修改响应状态码、头部、内容，并支持本地替换等
+	- 修改 WebSocket 和 TCP 收发的帧数据
+3. 设置 hosts（支持 IPv6）、http-proxy、https-proxy、socks 
+4. 作为HTTP代理或反向代理
+5. 集成常用的 web 调试工具，如 weinre 和 log 等
+6. 支持用 Node 编写插件扩展
 
 具体功能如下：
 
@@ -215,6 +217,21 @@ w2 restart
 12. [界面功能](https://avwo.github.io/whistle/webui/)
 13. [协议列表](https://avwo.github.io/whistle/rules/)
 14. [用户反馈](https://avwo.github.io/whistle/feedback.html)
+
+# 团队招聘
+IMWeb 前端工程师
+
+* 负责在线教育产品的Web全栈架构设计和研发
+* 负责 IMWeb Team 的幵源项目建设和工具研发
+* 能够熟练运用 Html5 、CSS3、ES6 构建高性能的Web应用程序
+* 熟练使用至少一款主流的 JS 框架，并深入理解其设计原理
+* 掌握至少一门服务器端编程语言，了解 HTTP 等网络协议
+* 熟悉 Web 开发调试技巧，能够熟练运用调试工具，有前端构建和前端工程化的实践经验
+* 对 Web 标准化、OOP、MVVM、模块化开发、设计模式有深刻的理解
+* 能够主动发现问题，并通过良好的沟通能力和技术手段解决问题
+* [点击了解更多](https://mp.weixin.qq.com/s?__biz=MzI1ODE4NzE1Nw==&mid=2247487881&idx=2&sn=f412bd0678d41b624b6e4ae839af2e54&chksm=ea0d5b73dd7ad26594687825027181d287905f4d7fb5aeae3fc2330e02a67f277c1129bd9d45&mpshare=1&scene=1&srcid=&sharer_sharetime=1587886827448&sharer_shareid=c44de93072c85a9158dc52ca271584bb&rd2werd=1#wechat_redirect)
+
+> 可以加我微信(aven0596)内推。
 
 # License
 [MIT](https://github.com/avwo/whistle/blob/master/LICENSE)

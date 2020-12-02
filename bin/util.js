@@ -10,6 +10,7 @@ var path = require('path');
 var CHECK_RUNNING_CMD = process.platform === 'win32' ? 
   'tasklist /fi "PID eq %s" | findstr /i "node.exe"'
   : 'ps -f -p %s | grep "node"';
+var isWin = process.platform === 'win32';
   
 function isRunning(pid, callback) {
   pid ? cp.exec(util.format(CHECK_RUNNING_CMD, pid), 
@@ -53,9 +54,20 @@ exports.error = error;
 exports.warn = warn;
 exports.info = info;
 
+function showKillError() {
+  error('[!] Cannot kill ' + config.name + ' owned by root');
+  info('[i] Try to run command ' + (isWin ? 'as an administrator' : 'with `sudo`'));
+}
+
+exports.showKillError = showKillError;
+
 function showUsage(isRunning, options, restart) {
   if (isRunning) {
-    warn('[!] ' + config.name + '@' + config.version + ' is running');
+    if (restart) {
+      showKillError();
+    } else {
+      warn('[!] ' + config.name + '@' + config.version + ' is running');
+    }
   } else {
     info('[i] ' + config.name + '@' + config.version + (restart ? ' restarted' : ' started'));
   }
@@ -72,7 +84,7 @@ function showUsage(isRunning, options, restart) {
   info('[i] 3. use ' + colors.bold('Chrome') + ' to visit ' + colors.bold('http://' + (options.localUIHost || config.localUIHost) + '/') + ' to get started');
 
   if (parseInt(process.version.slice(1), 10) < 6) {
-    warn(colors.bold('\nWarning: The current Node version is too low, access https://nodejs.org to install the latest version, or may not be able to intercept HTTPS CONNECTs\n'));
+    warn(colors.bold('\nWarning: The current Node version is too low, access https://nodejs.org to install the latest version, or may not be able to Capture HTTPS CONNECTs\n'));
   }
 }
 

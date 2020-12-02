@@ -51,6 +51,10 @@ var RULES_COMMENT_RE = /^()\s*#\s*/;
 var JS_COMMENT_RE = /^(\s*)\/\/+\s?/;
 var NO_SPACE_RE = /\S/;
 
+function hasSelector(selector) {
+  return document.querySelector ? document.querySelector(selector) : $(selector).length;
+}
+
 var Editor = React.createClass({
   getThemes: function() {
     return themes;
@@ -113,12 +117,30 @@ var Editor = React.createClass({
     }
   },
   setAutoComplete: function() {
-    var option = this.isRulesEditor() ? rulesHint.getExtraKeys() : {};
+    var isRules = this.isRulesEditor();
+    var option = isRules ? rulesHint.getExtraKeys() : {};
     if (!/\(Macintosh;/i.test(window.navigator.userAgent)) {
       option['Ctrl-F'] = 'findPersistent';
     }
     option['Cmd-F'] = 'findPersistent';
-    this._editor.setOption('extraKeys', option);
+    var editor = this._editor;
+    editor.setOption('extraKeys', option);
+    var timer;
+    if (isRules) {
+      editor.on('keyup', function(_, e) {
+        clearTimeout(timer);
+        var _byDelete = e.keyCode === 8;
+        if (_byDelete || e.keyCode === 13) {
+          timer = setTimeout(function() {
+            if (!hasSelector('.CodeMirror-hints')) {
+              editor._byDelete = true;
+              editor._byEnter = !_byDelete;
+              editor.execCommand('autocomplete');
+            }
+          }, 300);
+        }
+      });
+    }
   },
   isRulesEditor: function() {
     return this.props.name === 'rules' || this._mode === 'rules';

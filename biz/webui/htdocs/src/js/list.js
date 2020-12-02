@@ -11,21 +11,33 @@ var FilterInput = require('./filter-input');
 var ContextMenu = require('./context-menu');
 var dataCenter = require('./data-center');
 var events = require('./events');
+var iframes = require('./iframes');
 
 var rulesCtxMenuList = [
   { name: 'Copy' },
   { name: 'Enable', action: 'Save' },
-  { name: 'Create' },
+  {
+    name: 'Create',
+    action: 'Rule'
+  },
   { name: 'Rename' },
   { name: 'Delete' },
   { name: 'Export' },
   { name: 'Import' },
+  {
+    name: 'Others',
+    action: 'Plugins',
+    list: []
+  },
   { name: 'Help', sep: true }
 ];
 var valuesCtxMenuList = [
   { name: 'Copy' },
   { name: 'Save' },
-  { name: 'Create' },
+  {
+    name: 'Create',
+    action: 'Key'
+  },
   { name: 'Rename' },
   { name: 'Delete' },
   {
@@ -37,9 +49,15 @@ var valuesCtxMenuList = [
   },
   { name: 'Export' },
   { name: 'Import' },
+  {
+    name: 'Others',
+    action: 'Plugins',
+    list: []
+  },
   { name: 'Help', sep: true }
 ];
 var NAME_PREFIX = 'listmodal$';
+var JSON_RE = /^\s*(?:[\{｛][\w\W]+[\}｝]|\[[\w\W]+\])\s*$/;
 var curTarget;
 
 function getTarget(e) {
@@ -121,7 +139,8 @@ var List = React.createClass({
       self.onDoubleClick(item);
     }
     var modal = self.props.modal;
-
+    this.curListLen = modal.list.length;
+    this.curActiveItem = modal.getActive();
     $(ReactDOM.findDOMNode(self.refs.list)).focus().on('keydown', function(e) {
       var item;
       if (e.keyCode == 38) { //up
@@ -142,7 +161,14 @@ var List = React.createClass({
     return hide != util.getBoolean(nextProps.hide) || !hide;
   },
   componentDidUpdate: function() {
-    this.ensureVisible();
+    var modal = this.props.modal;
+    var curListLen = modal.list.length;
+    var curActiveItem = modal.getActive();
+    if (curListLen > this.curListLen || curActiveItem !== this.curActiveItem) {
+      this.ensureVisible();
+    }
+    this.curListLen = curListLen;
+    this.curActiveItem = curActiveItem;
   },
   ensureVisible: function(init) {
     var activeItem = this.props.modal.getActive();
@@ -159,6 +185,16 @@ var List = React.createClass({
       self.props.modal.setActive(item.name);
       self.setState({activeItem: item});
     }
+  },
+  onClickGroup: function(e) {
+    var name = e.target.getAttribute('data-group');
+    var groups = this.props.modal.groups;
+    var group = groups[name];
+    if (!group) {
+      group = groups[name] = {};
+    }
+    group.expand = !group.expand;
+    this.setState({});
   },
   onDoubleClick: function(item, okIcon) {
     item.selected && !item.changed || okIcon ? this.onUnselect(item) : this.onSelect(item);
@@ -259,9 +295,9 @@ var List = React.createClass({
       }
     }
   },
-  onClickContextMenu: function(action, e) {
+  onClickContextMenu: function(action, e, parentAction, menuName) {
     var name = this.props.name === 'rules' ? 'Rules' : 'Values';
-    switch(action) {
+    switch(parentAction || action) {
     case 'Save':
       events.trigger('save' + name, this.currentFocusItem);
       break;
@@ -271,8 +307,17 @@ var List = React.createClass({
     case 'Delete':
       events.trigger('delete' + name, this.currentFocusItem);
       break;
-    case 'Create':
-      events.trigger('create' + name);
+    case 'Rule':
+      events.trigger('createRules');
+      break;
+    case 'Key':
+      events.trigger('createValues');
+      break;
+    case 'ruleGroup':
+      events.trigger('createRuleGroup');
+      break;
+    case 'valueGroup':
+      events.trigger('createValueGroup');
       break;
     case 'Export':
       events.trigger('export' + name);
@@ -283,8 +328,15 @@ var List = React.createClass({
     case 'Validate':
       var item = this.currentFocusItem;
       if (item) {
-        if (util.parseRawJson(item.value)) {
-          message.success('Good JSON Object.');
+        if (JSON_RE.test(item.value)) {
+          try {
+            JSON.parse(item.value);
+            message.success('Good JSON Object.');
+          } catch(e) {
+            message.error('Warning: the value of ' + item.name + ' can\`t be parsed into json. ' + e.message);
+          }
+        } else {
+          message.error('Bad JSON Object.');
         }
       }
       break;
@@ -293,6 +345,17 @@ var List = React.createClass({
       break;
     case 'Help':
       window.open('https://avwo.github.io/whistle/webui/' + (this.props.name || 'values') + '.html');
+      break;
+    case 'Plugins':
+      var modal = this.props.modal;
+      iframes.fork(action, {
+        port: dataCenter.getPort(),
+        type: this.props.name === 'rules' ? 'rules' : 'values',
+        name: menuName,
+        list: modal && modal.getList(),
+        activeItem: this.currentFocusItem,
+        selectedItem: modal && modal.getActive()
+      });
       break;
     }
   },
@@ -323,7 +386,11 @@ var List = React.createClass({
     var disabled = !name;
     var isDefault;
     var isRules = this.props.name == 'rules';
-    var data = util.getMenuPosition(e, 110, isRules ? 220 : 250);
+    var pluginItem = isRules ? rulesCtxMenuList[7] : valuesCtxMenuList[8];
+    util.addPluginMenus(pluginItem, dataCenter[isRules ? 'getRulesMenus' : 'getValuesMenus'](), isRules ? 7 : 8);
+    var height = (isRules ? 250 : 280) - (pluginItem.hide ? 30 : 0);
+    pluginItem.maxHeight = height + 30;
+    var data = util.getMenuPosition(e, 110, height);
     if (isRules) {
       data.list = rulesCtxMenuList;
       data.list[1].disabled = disabled;
@@ -367,11 +434,13 @@ var List = React.createClass({
     }
     var isRules = self.props.name == 'rules';
     var draggable = false;
-
+    var activeName = activeItem ? activeItem.name : '';
     if (isRules) {
       draggable = list.length > 2;
+      util.triggerRulesActiveChange(activeName);
     } else if (list.length > 1) {
       draggable = true;
+      util.triggerValuesActiveChange(activeName);
     }
 
     //不设置height为0，滚动会有问题
@@ -394,7 +463,7 @@ var List = React.createClass({
                             onDrop={isDefaultRule ? undefined : self.onDrop}
                             style={{display: item.hide ? 'none' : null}}
                             key={item.key} data-key={item.key}
-                            href="javascript:;"
+                           
                             draggable={isDefaultRule ? false : draggable}
                             onClick={function() {
                               self.onClick(item);

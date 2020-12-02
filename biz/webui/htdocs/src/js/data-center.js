@@ -1,14 +1,14 @@
 var $ = require('jquery');
-var createCgi = require('./cgi');
+var createCgiObj = require('./cgi');
 var util = require('./util');
 var NetworkModal = require('./network-modal');
 var storage = require('./storage');
 var events = require('./events');
 
+var createCgi = createCgiObj.createCgi;
 var MAX_INCLUDE_LEN = 5120;
 var MAX_EXCLUDE_LEN = 5120;
-var MAX_FRAMES_LENGTH = exports.MAX_FRAMES_LENGTH = 80;
-var MAX_COUNT = NetworkModal.MAX_COUNT;
+var MAX_FRAMES_LENGTH = exports.MAX_FRAMES_LENGTH = 120;
 var TIMEOUT = 20000;
 var dataCallbacks = [];
 var serverInfoCallbacks = [];
@@ -32,8 +32,15 @@ var clearNetwork;
 var inited;
 var logId;
 var uploadFiles;
+var port;
 var dumpCount = 0;
+var updateCount = 0;
+var MAX_UPDATE_COUNT = 4;
+var MAX_WAIT_TIME = 1000 * 60 * 3;
 var onlyViewOwnData = storage.get('onlyViewOwnData') == 1;
+var pluginsMap = {};
+var disabledPlugins = {};
+var disabledAllPlugins;
 var DEFAULT_CONF = {
   timeout: TIMEOUT,
   xhrFields: {
@@ -41,14 +48,6 @@ var DEFAULT_CONF = {
   },
   data: {}
 };
-var whistlePort = /_whistleuipath_=(\d+)/.test(document.cookie);
-if (whistlePort) {
-  whistlePort = RegExp.$1;
-  if (!(whistlePort > 0 && whistlePort <= 65535)) {
-    whistlePort = null;
-  }
-}
-var BASE_URI = whistlePort ? '...whistle-path.5b6af7b9884e1165...///cgi.' + whistlePort + '/' : '';
 exports.clientIp = '127.0.0.1';
 exports.MAX_INCLUDE_LEN = MAX_INCLUDE_LEN;
 exports.MAX_EXCLUDE_LEN = MAX_EXCLUDE_LEN;
@@ -58,6 +57,10 @@ exports.changeLogId = function(id) {
 
 exports.getUploadFiles = function() {
   return uploadFiles;
+};
+
+exports.getPort = function() {
+  return port;
 };
 
 exports.setDumpCount = function(count) {
@@ -103,20 +106,36 @@ function handleHashFilterChanged(e) {
   var filter;
   if (index !== -1) {
     var obj = util.parseQueryString(hash.substring(index + 1), null, null, decodeURIComponent);
-    exports.activeRulesName = obj.rulesName || obj.ruleName;
-    exports.activeValuesName = obj.valuesName || obj.valueName;
+    var curRuleName = obj.rulesName || obj.ruleName;
+    var curValueName = obj.valuesName || obj.valueName;
+    if (curRuleName !== exports.activeRulesName) {
+      exports.activeRulesName = curRuleName;
+      events.trigger('activeRules');
+    }
+    if (curValueName !== exports.activeValuesName) {
+      exports.activeValuesName = curValueName;
+      events.trigger('activeValues');
+    }
     if (obj.url) {
       filter = {};
       filter.url = obj.url;
     }
-    if (obj.name && obj.value) {
-      filter = filter || {};
-      filter.name = obj.name;
-      filter.value = obj.value;
+    for (var i = 0; i < 6; i++) {
+      var key = 'name' + (i || '');
+      var header = obj[key];
+      if (header) {
+        filter = filter || {};
+        filter[key] = header;
+        var value = 'value' + (i || '');
+        filter[value] = obj[value] || '';
+      }
     }
     if (obj.ip) {
       filter = filter || {};
       filter.ip = obj.ip;
+    }
+    if (filter && filter.name && obj.mtype === 'exact') {
+      filter.mtype = 1;
     }
     if (!inited && obj.clearNetwork === 'true') {
       clearNetwork = true;
@@ -159,7 +178,6 @@ exports.getFilterText = getFilterText;
 function setNetworkColumns(settings) {
   settings = settings || {};
   storage.set('networkColumns', JSON.stringify({
-    disabledColumns: settings.disabledColumns,
     columns: settings.columns
   }));
 }
@@ -307,99 +325,110 @@ var POST_CONF = $.extend({
 var GET_CONF = $.extend({
   cache: false
 }, DEFAULT_CONF);
-var cgi = createCgi({
-  getData: BASE_URI + 'cgi-bin/get-data',
-  getInitaial: BASE_URI + 'cgi-bin/init'
+var cgi = createCgiObj({
+  getData: 'cgi-bin/get-data',
+  getInitial: 'cgi-bin/init'
 }, GET_CONF);
+
+exports.createCgi = function(url, cancel) {
+  return createCgi({
+    url: url,
+    mode: cancel ? 'cancel' : null
+  }, GET_CONF);
+};
 
 function toLowerCase(str) {
   return String(str == null ? '' : str).trim().toLowerCase();
 }
 
-exports.values = createCgi({
+exports.getCustomCertsInfo = createCgiObj({
+  getCustomCertsInfo: 'cgi-bin/get-custom-certs-files'
+}, GET_CONF).getCustomCertsInfo;
+
+exports.values = createCgiObj({
   moveTo: {
     mode: 'chain',
-    url: BASE_URI + 'cgi-bin/values/move-to'
+    url: 'cgi-bin/values/move-to'
   },
   list: {
     type: 'get',
-    url: BASE_URI + 'cgi-bin/values/list'
+    url: 'cgi-bin/values/list'
   },
-  add: BASE_URI + 'cgi-bin/values/add',
-  remove: BASE_URI + 'cgi-bin/values/remove',
-  rename: BASE_URI + 'cgi-bin/values/rename',
-  upload: BASE_URI + 'cgi-bin/values/upload',
-  checkFile: BASE_URI + 'cgi-bin/values/check-file',
-  removeFile: BASE_URI + 'cgi-bin/values/remove-file'
+  add: 'cgi-bin/values/add',
+  remove: 'cgi-bin/values/remove',
+  rename: 'cgi-bin/values/rename',
+  upload: 'cgi-bin/values/upload',
+  checkFile: 'cgi-bin/values/check-file',
+  removeFile: 'cgi-bin/values/remove-file'
 }, POST_CONF);
 
-exports.plugins = createCgi({
-  disablePlugin: BASE_URI + 'cgi-bin/plugins/disable-plugin',
-  disableAllPlugins: BASE_URI + 'cgi-bin/plugins/disable-all-plugins',
-  getPlugins: {
-    type: 'get',
-    url: BASE_URI + 'cgi-bin/plugins/get-plugins'
-  }
+exports.plugins = createCgiObj({
+  disablePlugin: 'cgi-bin/plugins/disable-plugin',
+  disableAllPlugins: 'cgi-bin/plugins/disable-all-plugins'
 }, POST_CONF);
 
-exports.rules = createCgi({
-  disableAllRules: BASE_URI + 'cgi-bin/rules/disable-all-rules',
+exports.rules = createCgiObj({
+  disableAllRules: 'cgi-bin/rules/disable-all-rules',
   moveTo: {
     mode: 'chain',
-    url: BASE_URI + 'cgi-bin/rules/move-to'
+    url: 'cgi-bin/rules/move-to'
   },
   list: {
     type: 'get',
-    url: BASE_URI + 'cgi-bin/rules/list'
+    url: 'cgi-bin/rules/list'
   },
-  add: BASE_URI + 'cgi-bin/rules/add',
-  disableDefault: BASE_URI + 'cgi-bin/rules/disable-default',
-  enableDefault: BASE_URI + 'cgi-bin/rules/enable-default',
-  remove: BASE_URI + 'cgi-bin/rules/remove',
-  rename: BASE_URI + 'cgi-bin/rules/rename',
-  select: BASE_URI + 'cgi-bin/rules/select',
-  unselect: BASE_URI + 'cgi-bin/rules/unselect',
+  add: 'cgi-bin/rules/add',
+  disableDefault: 'cgi-bin/rules/disable-default',
+  enableDefault: 'cgi-bin/rules/enable-default',
+  remove: 'cgi-bin/rules/remove',
+  rename: 'cgi-bin/rules/rename',
+  select: 'cgi-bin/rules/select',
+  unselect: 'cgi-bin/rules/unselect',
   allowMultipleChoice: {
     mode: 'ignore',
-    url: BASE_URI + 'cgi-bin/rules/allow-multiple-choice'
+    url: 'cgi-bin/rules/allow-multiple-choice'
   },
   enableBackRulesFirst: {
     mode: 'ignore',
-    url: BASE_URI + 'cgi-bin/rules/enable-back-rules-first'
+    url: 'cgi-bin/rules/enable-back-rules-first'
   },
-  syncWithSysHosts: BASE_URI + 'cgi-bin/rules/sync-with-sys-hosts',
-  setSysHosts: BASE_URI + 'cgi-bin/rules/set-sys-hosts',
-  getSysHosts: BASE_URI + 'cgi-bin/rules/get-sys-hosts'
+  setSysHosts: 'cgi-bin/rules/set-sys-hosts'
 }, POST_CONF);
 
-exports.log = createCgi({
-  set: BASE_URI + 'cgi-bin/log/set'
+exports.log = createCgiObj({
+  set: 'cgi-bin/log/set'
 }, POST_CONF);
 
-$.extend(exports, createCgi({
-  composer: BASE_URI + 'cgi-bin/composer',
-  interceptHttpsConnects: BASE_URI + 'cgi-bin/intercept-https-connects',
-  abort: BASE_URI + 'cgi-bin/abort'
+$.extend(exports, createCgiObj({
+  composer: {
+    url: 'cgi-bin/composer',
+    mode: 'cancel'
+  },
+  compose2: 'cgi-bin/composer',
+  interceptHttpsConnects: 'cgi-bin/intercept-https-connects',
+  enableHttp2: 'cgi-bin/enable-http2',
+  abort: 'cgi-bin/abort',
+  setCustomColumn: 'cgi-bin/set-custom-column'
 }, POST_CONF));
-$.extend(exports, createCgi({
-  donotShowAgain: BASE_URI + 'cgi-bin/do-not-show-again',
-  checkUpdate: BASE_URI + 'cgi-bin/check-update',
-  importRemote: BASE_URI + 'cgi-bin/import-remote',
-  getHistory: BASE_URI + 'cgi-bin/history'
+$.extend(exports, createCgiObj({
+  donotShowAgain: 'cgi-bin/do-not-show-again',
+  checkUpdate: 'cgi-bin/check-update',
+  importRemote: 'cgi-bin/import-remote',
+  getHistory: 'cgi-bin/history'
 }, GET_CONF));
 
-exports.socket = $.extend(createCgi({
+exports.socket = $.extend(createCgiObj({
   changeStatus: {
     mode: 'cancel',
-    url: BASE_URI + 'cgi-bin/socket/change-status'
+    url: 'cgi-bin/socket/change-status'
   },
   abort: {
     mode: 'ignore',
-    url: BASE_URI + 'cgi-bin/socket/abort'
+    url: 'cgi-bin/socket/abort'
   },
   send: {
     mode: 'ignore',
-    url: BASE_URI + 'cgi-bin/socket/data'
+    url: 'cgi-bin/socket/data'
   }
 }, POST_CONF));
 
@@ -408,10 +437,15 @@ exports.getInitialData = function (callback) {
     initialDataPromise = $.Deferred();
 
     var load = function() {
-      cgi.getInitaial(function (data) {
+      cgi.getInitial(function (data) {
         if (!data) {
           return setTimeout(load, 1000);
         }
+        port = data.server && data.server.port;
+        exports.supportH2 = data.supportH2;
+        exports.hasInvalidCerts = data.hasInvalidCerts;
+        exports.custom1 = data.custom1;
+        exports.custom2 = data.custom2;
         uploadFiles = data.uploadFiles;
         initialData = data;
         DEFAULT_CONF.data.clientId = data.clientId;
@@ -424,10 +458,10 @@ exports.getInitialData = function (callback) {
         if (data.lastDataId) {
           lastRowId = data.lastDataId;
         }
-        exports.upload = createCgi({
-          importSessions: BASE_URI + 'cgi-bin/sessions/import?clientId=' + data.clientId,
-          importRules: BASE_URI + 'cgi-bin/rules/import?clientId=' + data.clientId,
-          importValues: BASE_URI + 'cgi-bin/values/import?clientId=' + data.clientId
+        exports.upload = createCgiObj({
+          importSessions: 'cgi-bin/sessions/import?clientId=' + data.clientId,
+          importRules: 'cgi-bin/rules/import?clientId=' + data.clientId,
+          importValues: 'cgi-bin/values/import?clientId=' + data.clientId
         }, $.extend({
           type: 'post'
         }, DEFAULT_CONF, {
@@ -473,23 +507,42 @@ function emitValuesChanged(data) {
     events.trigger('valuesChanged');
   }
 }
-
+var hiddenTime = Date.now();
 function startLoadData() {
   if (startedLoad) {
     return;
   }
   startedLoad = true;
   function load() {
+    if (document.hidden) {
+      if (Date.now() - hiddenTime > MAX_WAIT_TIME) {
+        return setTimeout(load, 100);
+      }
+    } else {
+      hiddenTime = Date.now();
+    }
+
     if (networkModal.clearNetwork) {
       lastRowId = endId || lastRowId;
       networkModal.clearNetwork = false;
     }
-    var pendingIds = getPendingIds();
+
     var startTime = getStartTime();
     var len = logList.length;
     var svrLen = svrLogList.length;
     var startLogTime = -1;
     var startSvrLogTime = -1;
+    var pendingIds = [];
+    var tunnelIds = [];
+    dataList.forEach(function (item) {
+      if (!item.endTime && !item.lost) {
+        pendingIds.push(item.id);
+      }
+      if (item.reqPlugin > 0 && item.reqPlugin < 10) {
+        ++item.reqPlugin;
+        tunnelIds.push(item.id);
+      }
+    });
 
     if (!exports.pauseConsoleRefresh && len < 100) {
       startLogTime = lastPageLogTime;
@@ -522,7 +575,8 @@ function startLoadData() {
       curReqId: curReqId,
       lastFrameId: lastFrameId,
       logId: logId || '',
-      count: count || 20
+      count: count || 20,
+      tunnelIds: tunnelIds
     };
     inited = true;
     $.extend(options, hashFilterObj);
@@ -530,12 +584,17 @@ function startLoadData() {
       options.ip = 'self';
     }
     cgi.getData(options, function (data) {
-      var newIds = data && data.data && data.data.newIds || [];
-      setTimeout(load, newIds.length >= 30 ? 30 : 900);
+      var hasNewData = data && data.data && data.data.hasNew;
+      setTimeout(load, hasNewData ? 100 : 900);
       updateServerInfo(data);
       if (!data || data.ec !== 0) {
         return;
       }
+      port = data.server && data.server.port;
+      exports.supportH2 = data.supportH2;
+      exports.hasInvalidCerts = data.hasInvalidCerts;
+      exports.custom1 = data.custom1;
+      exports.custom2 = data.custom2;
       if (options.dumpCount > 0) {
         dumpCount = 0;
       }
@@ -549,6 +608,9 @@ function startLoadData() {
       });
       var len = data.log.length;
       var svrLen = data.svrLog.length;
+      pluginsMap = data.plugins || {};
+      disabledPlugins = data.disabledPlugins || {};
+      disabledAllPlugins = data.disabledAllPlugins;
       if (len || svrLen) {
         if (len) {
           logList.push.apply(logList, data.log);
@@ -570,7 +632,6 @@ function startLoadData() {
       if (data.lastSvrLogId) {
         lastSvrLogTime = data.lastSvrLogId;
       }
-
       data = data.data;
       var hasChhanged;
       var framesLen = data.frames && data.frames.length;
@@ -606,11 +667,24 @@ function startLoadData() {
       if (data.endId) {
         endId = data.endId;
       }
+      var tunnelIps = data.tunnelIps || '';
       if ((!data.ids.length && !data.newIds.length) || networkModal.clearNetwork) {
         if (hasChhanged || framesLen) {
           framesUpdateCallbacks.forEach(function(cb) {
             cb();
           });
+        }
+        if (Object.keys(tunnelIps).length) {
+          var hasNewIp;
+          dataList.forEach(function(item) {
+            var realIp = tunnelIps[item.id];
+            if (realIp) {
+              delete item.reqPlugin;
+              item.realIp = realIp;
+              hasNewIp = true;
+            }
+          });
+          hasNewIp && events.trigger('updateUI');
         }
         return;
       }
@@ -623,6 +697,11 @@ function startLoadData() {
           setReqData(item);
         } else {
           item.lost = true;
+        }
+        var realIp = tunnelIps[item.id];
+        if (realIp) {
+          delete item.reqPlugin;
+          item.realIp = realIp;
         }
       });
       if (ids.length) {
@@ -648,9 +727,7 @@ function startLoadData() {
   load();
 }
 
-function setRawHeaders(obj) {
-  var headers = obj.headers;
-  var rawHeaderNames = obj.rawHeaderNames;
+function getRawHeaders(headers, rawHeaderNames) {
   if (!headers || !rawHeaderNames) {
     return;
   }
@@ -658,8 +735,10 @@ function setRawHeaders(obj) {
   Object.keys(headers).forEach(function (name) {
     rawHeaders[rawHeaderNames[name] || name] = headers[name];
   });
-  obj.rawHeaders = rawHeaders;
+  return rawHeaders;
 }
+
+exports.getRawHeaders = getRawHeaders;
 
 function isSocket(item) {
   if (!item || !item.endTime || item.reqError || item.resError) {
@@ -669,6 +748,72 @@ function isSocket(item) {
     return item.res.statusCode == 101;
   }
   return item.inspect || (item.isHttps && item.req.headers['x-whistle-policy'] === 'tunnel');
+}
+
+function getStyleValue(style) {
+  var index = style.indexOf('&');
+  if (index !== -1) {
+    style = style.substring(0, index);
+  }
+  index = style.indexOf('!');
+  if (index !== -1) {
+    style = style.substring(0, index);
+  }
+  if (style[0] === '@') {
+    style = '#' + style.substring(1);
+  }
+  return style.length > 32 ? undefined : style;
+}
+
+function getCustomValue(style, isFirst) {
+  var index = style.lastIndexOf('&custom' + (isFirst ? '1=' : '2='));
+  if (index === -1) {
+    return;
+  }
+  style = style.substring(index + 9);
+  index = style.indexOf('&');
+  style = index === -1 ? style : style.substring(0, index);
+  if (style.indexOf('%') !== -1) {
+    try {
+      return decodeURIComponent(style);
+    } catch (e) {}
+  }
+  return style;
+}
+
+function setStyle(item) {
+  item.style = undefined;
+  var style = item.rules && item.rules.style;
+  style = style && style.list;
+  if (!style) {
+    return;
+  }
+  style = '&' + style.map(function(rule) {
+    rule = rule.value || rule.matcher;
+    return rule.substring(rule.indexOf('://') + 3);
+  }).join('&');
+  var color, fontStyle, bgColor;
+  var colorIndex = style.lastIndexOf('&color=');
+  if (colorIndex !== -1) {
+    color = getStyleValue(style.substring(colorIndex + 7));
+  }
+  var styleIndex = style.lastIndexOf('&fontStyle=');
+  if (styleIndex !== -1) {
+    fontStyle = getStyleValue(style.substring(styleIndex + 11));
+  }
+  var bgIndex = style.lastIndexOf('&bgColor=');
+  if (bgIndex !== -1) {
+    bgColor = getStyleValue(style.substring(bgIndex + 9));
+  }
+  if (color || fontStyle || bgColor) {
+    item.style = {
+      color: color,
+      fontStyle: fontStyle,
+      backgroundColor: bgColor
+    };
+  }
+  item.custom1 = getCustomValue(style, true);
+  item.custom2 = getCustomValue(style);
 }
 
 function setReqData(item) {
@@ -681,10 +826,10 @@ function setReqData(item) {
   var resHeaders = res.headers || '';
   item.hostIp = res.ip || defaultValue;
   item.clientIp = req.ip || '127.0.0.1';
-  item.date = item.date || new Date(item.startTime).toLocaleString();
+  item.date = item.date || util.toLocaleString(new Date(item.startTime));
   item.clientPort = req.port;
   item.serverPort = item.res.port;
-  item.contentEncoding = resHeaders['content-encoding'];
+  item.contentEncoding = (resHeaders['content-encoding'] || '') + (item.res.hasGzipError ? ' (Incorrect header)' : '');
   item.body = res.size == null ? defaultValue : res.size;
   var result = res.statusCode == null ? defaultValue : res.statusCode;
   item.result = /^[1-9]/.test(result) && parseInt(result, 10) || result;
@@ -704,13 +849,15 @@ function setReqData(item) {
     }
   }
   
-  setRawHeaders(req);
-  setRawHeaders(res);
+  req.rawHeaders = getRawHeaders(req.headers, req.rawHeaderNames);
+  res.rawHeaders = getRawHeaders(res.headers, res.rawHeaderNames);
+  res.rawTrailers = getRawHeaders(res.trailers, res.rawTrailerNames);
+  setStyle(item);
   if (item.rules && item.pipe) {
     item.rules.pipe = item.pipe;
   }
   if (!item.path) {
-    item.protocol = item.isHttps ? 'HTTP' : util.getProtocol(url);
+    item.protocol = item.isHttps ? 'HTTP' : (item.useH2 ? 'H2' : util.getProtocol(url));
     item.hostname = item.isHttps ? 'Tunnel to' : util.getHost(url);
     var pathIndex = url.indexOf('://');
     if (pathIndex !== -1) {
@@ -722,6 +869,11 @@ function setReqData(item) {
     if (item.path.length > MAX_PATH_LENGTH) {
       item.path = item.path.substring(0, MAX_PATH_LENGTH) + '...';
     }
+  } else if (!item.useH2 && item.protocol === 'H2') {
+    item.protocol = item.isHttps ? 'HTTP' : util.getProtocol(url);
+  }
+  if (item.useHttp && (item.protocol === 'HTTPS' || item.protocol === 'WSS')) {
+    item.protocol = item.protocol + ' > ' + item.protocol.slice(0, -1);
   }
   if (!item.frames && isSocket(item)) {
     item.frames = [];
@@ -765,27 +917,15 @@ exports.addNetworkList = function (list) {
   }
 };
 
-function getPendingIds() {
-  var pendingIds = [];
-  dataList.forEach(function (item) {
-    if (!item.endTime && !item.lost) {
-      pendingIds.push(item.id);
-    }
-  });
-  return pendingIds;
-}
-
 function getStartTime() {
   if (!inited) {
     return clearNetwork ? -2 : '';
   }
-  if (dataList.length - 1 > MAX_COUNT || exports.stopRefresh) {
+  if (dataList.length - 1 > NetworkModal.MAX_COUNT || exports.stopRefresh) {
     return -1;
   }
   return lastRowId || '0';
 }
-
-var updateCount = 0;
 
 function updateServerInfo(data) {
   if (!serverInfoCallbacks.length) {
@@ -795,7 +935,7 @@ function updateServerInfo(data) {
 
   if (!(data = data && data.server)) {
     ++updateCount;
-    if (updateCount > 3) {
+    if (updateCount >= MAX_UPDATE_COUNT) {
       curServerInfo = data;
       serverInfoCallbacks.forEach(function (cb) {
         cb(false);
@@ -808,9 +948,9 @@ function updateServerInfo(data) {
     curServerInfo.strictMode = data.strictMode;
     events.trigger('updateStrictMode');
   }
-  if (curServerInfo && curServerInfo.version == data.version &&
-    curServerInfo.networkMode === data.networkMode && curServerInfo.multiEnv === data.multiEnv &&
-    curServerInfo.baseDir == data.baseDir && curServerInfo.username == data.username &&
+  if (curServerInfo && curServerInfo.version == data.version && curServerInfo.rulesMode === data.rulesMode && curServerInfo.cmdName === data.cmdName &&
+    curServerInfo.networkMode === data.networkMode && curServerInfo.pluginsMode === data.pluginsMode && curServerInfo.multiEnv === data.multiEnv &&
+    curServerInfo.baseDir == data.baseDir && curServerInfo.username == data.username && curServerInfo.nodeVersion == data.nodeVersion &&
     curServerInfo.port == data.port && curServerInfo.host == data.host &&
     curServerInfo.ipv4.sort().join() == data.ipv4.sort().join() &&
     curServerInfo.ipv6.sort().join() == data.ipv6.sort().join()) {
@@ -828,6 +968,10 @@ exports.isMutilEnv = function() {
 };
 exports.isStrictMode = function() {
   return (curServerInfo && curServerInfo.strictMode) || false;
+};
+
+exports.getServerInfo = function() {
+  return curServerInfo || '';
 };
 
 exports.on = function (type, callback) {
@@ -890,4 +1034,50 @@ exports.pauseServerLogRecord = function() {
 exports.stopServerLogRecord = function(stop) {
   exports.pauseServerLogRefresh = false;
   exports.stopServerLogRefresh = stop;
+};
+
+exports.getPlugin = function(name) {
+  if (disabledAllPlugins || disabledPlugins[name.slice(0, -1)]) {
+    return;
+  }
+  return pluginsMap[name];
+};
+
+function getMenus(menuName) {
+  var list = [];
+  if (disabledAllPlugins) {
+    return list;
+  }
+  Object.keys(pluginsMap).forEach(function(name) {
+    var plugin = pluginsMap[name];
+    var menus = plugin[menuName];
+    if (menus) {
+      name = name.slice(0, -1);
+      if (!disabledPlugins[name]) {
+        menus.forEach(function(menu) {
+          menu.title = name + ' extension menu';
+          menu.mtime = plugin.mtime;
+          list.push(menu);
+        });
+      }
+    }
+  });
+  return list.length > 1 ? list.sort(function(prev, next) {
+    if (prev.mtime === next.mtime) {
+      return 0;
+    }
+    return prev.mtime > next.mtime ? 1 : -1;
+  }) : list;
+}
+
+exports.getNetworkMenus = function() {
+  return getMenus('networkMenus');
+};
+
+exports.getRulesMenus = function() {
+  return getMenus('rulesMenus');
+};
+
+exports.getValuesMenus = function() {
+  return getMenus('valuesMenus');
 };

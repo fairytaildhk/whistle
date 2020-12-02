@@ -24,7 +24,7 @@ function showError(msg, input) {
 
 function fomatFiles(files) {
   return files.map(function(file) {
-    file.date = new Date(file.date).toLocaleString();
+    file.date = util.toLocaleString(new Date(file.date));
     return file;
   });
 }
@@ -121,7 +121,7 @@ var FilesDialog = React.createClass({
         return;
       }
       self.pending = true;
-      dataCenter.values.upload(self.params, function(data, xhr) {
+      dataCenter.values.upload(JSON.stringify(self.params), function(data, xhr) {
         self.pending = false;
         if (!data) {
           return util.showSystemError(xhr);
@@ -133,6 +133,9 @@ var FilesDialog = React.createClass({
         self.refs.filenameDialog.hide();
         self.updateFiles(data.files);
         self.show();
+      }, {
+        contentType: 'application/json',
+        processData: false
       });
     });
   },
@@ -233,10 +236,10 @@ var FilesDialog = React.createClass({
                         <td className="w-files-date">{file.date}</td>
                         <td className="w-files-path">{filePath}</td>
                         <td className="w-files-operation">
-                          <a href="javascript:;" className="w-copy-text-with-tips"
+                          <a className="w-copy-text-with-tips"
                             data-clipboard-text={filePath}>Copy path</a>
-                          <a href="javascript:;" data-name={file.name} onClick={self.downloadFile}>Download</a>
-                          <a href="javascript:;" data-name={file.name} onClick={self.remove}>Delete</a>
+                          <a data-name={file.name} onClick={self.downloadFile}>Download</a>
+                          <a data-name={file.name} onClick={self.remove}>Delete</a>
                         </td>
                       </tr>
                     );

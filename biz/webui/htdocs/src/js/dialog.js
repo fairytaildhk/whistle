@@ -11,15 +11,27 @@ var Dialog = React.createClass({
     this.container.addClass('modal fade' + (this.props.wstyle ? ' ' + this.props.wstyle : ''));
     document.body.appendChild(this.container[0]);
     this.componentDidUpdate();
+    if (typeof this.props.customRef === 'function') {
+      this.props.customRef(this);
+    }
+    if (typeof this.props.onClose === 'function') {
+      this.container.on('hidden.bs.modal', this.props.onClose);
+    }
   },
   componentDidUpdate: function() {
     ReactDOM.unstable_renderSubtreeIntoContainer(this,
             this.getDialogElement(), this.container[0]);
   },
   getDialogElement: function() {
-    var className = this.props.wclassName;
+    var props = this.props;
+    var className = props.wclassName;
+    var style;
+    if (props.width > 0) {
+      style = style || {};
+      style.width = props.width;
+    }
     return (
-        <div className={'modal-dialog' + (className ? ' ' + className : '')}>
+        <div style={style} className={'modal-dialog' + (className ? ' ' + className : '')}>
             <div className="modal-content">
               {this.props.children}
             </div>
@@ -44,6 +56,10 @@ var Dialog = React.createClass({
   },
   hide: function() {
     this.container.modal('hide');
+  },
+  destroy: function() {
+    this.hide();
+    this.container && this.componentWillUnmount();
   },
   render: function() {
 

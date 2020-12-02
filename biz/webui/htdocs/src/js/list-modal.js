@@ -12,6 +12,7 @@ proto.reset = function(list, data, init) {
   self.list = Array.isArray(list) ? list : [];
   data = data || {};
   self.data = {};
+  self.groups = {};
   self.list.forEach(function(name) {
     var item = self.data[name] = data[name] || {};
     item.key = item.key || util.getKey();
@@ -20,6 +21,13 @@ proto.reset = function(list, data, init) {
   if (!init) {
     self.filter();
   }
+};
+
+proto.getList = function() {
+  var data = this.data;
+  return this.list.map(function(key) {
+    return data[key];
+  });
 };
 
 proto._getList = function(prop) {

@@ -1,8 +1,22 @@
 var $ = require('jquery');
 var dataCenter = require('./data-center');
 var util = require('./util');
+var storage = require('./storage');
 
 var settings = dataCenter.getNetworkColumns();
+
+var minWidth = storage.get('minNetworkWidth');
+if (minWidth) {
+  storage.set('minNetworkWidth', parseInt(minWidth, 10) || '');
+}
+
+exports.getMinWidth = function() {
+  return storage.get('minNetworkWidth');
+};
+
+exports.setMinWidth = function(width) {
+  storage.set('minNetworkWidth', width);
+};
 
 function getDefaultColumns() {
 
@@ -12,14 +26,14 @@ function getDefaultColumns() {
       name: 'date',
       className: 'date',
       showTitle: true,
-      minWidth: 150
+      width: 160
     },
     {
       title: 'Result',
       name: 'result',
       className: 'result',
       selected: true,
-      minWidth: 65
+      width: 65
     },
     {
       title: 'Method',
@@ -27,21 +41,21 @@ function getDefaultColumns() {
       className: 'method',
       showTitle: true,
       selected: true,
-      minWidth: 75
+      width: 75
     },
     {
       title: 'Protocol',
       name: 'protocol',
       className: 'protocol',
       selected: true,
-      minWidth: 75
+      width: 95
     },
     {
       title: 'ClientIP',
       name: 'clientIp',
       className: 'clientIp',
       showTitle: true,
-      minWidth: 110
+      width: 110
     },
     {
       title: 'ServerIP',
@@ -49,20 +63,19 @@ function getDefaultColumns() {
       className: 'hostIp',
       selected: true,
       showTitle: true,
-      minWidth: 110
+      width: 110
     },
     {
       title: 'ClientPort',
       name: 'clientPort',
       className: 'clientPort',
-      minWidth: 90
+      width: 90
     },
     {
       title: 'ServerPort',
       name: 'serverPort',
       className: 'serverPort',
-      minWidth: 90,
-      lazy: true
+      width: 90
     },
     {
       title: 'Host',
@@ -70,15 +83,15 @@ function getDefaultColumns() {
       className: 'hostname',
       selected: true,
       showTitle: true,
-      minWidth: 150
+      width: 150
     },
     {
       title: 'URL',
       name: 'path',
       className: 'path',
       selected: true,
-      minWidth: 60,
-      lazy: true
+      locked: true,
+      minWidth: 60
     },
     {
       title: 'Type',
@@ -86,67 +99,70 @@ function getDefaultColumns() {
       className: 'type',
       selected: true,
       showTitle: true,
-      minWidth: 125,
-      lazy: true
+      width: 125
     },
     {
       title: 'Body',
       name: 'body',
       className: 'body',
-      minWidth: 90,
-      lazy: true
+      width: 90
     },
     {
       title: 'Encoding',
       name: 'contentEncoding',
       className: 'contentEncoding',
-      minWidth: 90,
-      lazy: true
+      width: 90
     },
     {
       title: 'DNS',
       name: 'dns',
       className: 'dns',
-      minWidth: 70
+      width: 70
     },
     {
       title: 'Request',
       name: 'request',
       className: 'request',
-      minWidth: 90
+      width: 90
     },
     {
       title: 'Response',
       name: 'response',
       className: 'response',
-      minWidth: 90,
-      lazy: true
+      width: 90
     },
     {
       title: 'Download',
       name: 'download',
       className: 'download',
-      minWidth: 90,
-      lazy: true
+      width: 90
     },
     {
       title: 'Time',
       name: 'time',
       className: 'time',
       selected: true,
-      minWidth: 70,
-      lazy: true
+      width: 70
+    },
+    {
+      title: 'Custom1',
+      name: 'custom1',
+      className: 'custom1',
+      showTitle: true,
+      width: 120
+    },
+    {
+      title: 'Custom2',
+      name: 'custom2',
+      className: 'custom2',
+      showTitle: true,
+      width: 160
     }
   ];
 }
 
-function filterSelected(item) {
-  return item.selected;
-}
-
 var columnsMap;
 var curColumns;
-var DEFAULT_SELECTED_COLUMNS = getDefaultColumns().filter(filterSelected);
 
 function reset() {
   columnsMap = {};
@@ -178,7 +194,6 @@ if (Array.isArray(settings.columns)) {
 }
 
 settings = {
-  disabledColumns: !!settings.disabledColumns,
   columns: curColumns
 };
 
@@ -187,12 +202,12 @@ function save() {
   dataCenter.setNetworkColumns(settings);
 }
 
-exports.isDisabled = function() {
-  return settings.disabledColumns;
+exports.getColumn = function(name) {
+  return columnsMap[name];
 };
 
 function moveTo(name, targetName) {
-  if (settings.disabledColumns || name === targetName) {
+  if (name === targetName) {
     return;
   }
   var col = columnsMap[name];
@@ -207,19 +222,15 @@ function moveTo(name, targetName) {
   save();
 }
 
-exports.disable = function(disabled) {
-  settings.disabledColumns = disabled !== false;
-  save();
-};
-
 exports.getAllColumns = function() {
   return curColumns;
 };
 exports.reset = function() {
+  storage.set('minNetworkWidth', '');
   reset();
   save();
 };
-exports.setselected = function(name, selected) {
+exports.setSelected = function(name, selected) {
   var col = columnsMap[name];
   if (col) {
     col.selected = selected !== false;
@@ -227,10 +238,18 @@ exports.setselected = function(name, selected) {
   }
 };
 exports.getSelectedColumns = function() {
-  if (settings.disabledColumns) {
-    return DEFAULT_SELECTED_COLUMNS;
-  }
-  return curColumns.filter(filterSelected);
+  var width = 50;
+  var list = curColumns.filter(function(col) {
+    if (col.selected || col.locked) {
+      width += col.width || col.minWidth;
+      return true;
+    }
+  });
+  return {
+    width: width,
+    style: { minWidth: width },
+    list: list
+  };
 };
 
 var COLUMN_TYPE_PREFIX = 'networkcolumn$';

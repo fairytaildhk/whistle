@@ -122,13 +122,13 @@ var Console = React.createClass({
       updateLogs(curLogs);
     });
     dataCenter.on('log', updateLogs);
-    var timeout;
     $(container).on('scroll', function() {
       var data = self.state.logs;
-      timeout && clearTimeout(timeout);
+      clearTimeout(self.scrollTimer);
       if (data && (self.state.scrollToBottom = util.scrollAtBottom(container, content))) {
-        timeout = setTimeout(function() {
+        self.scrollTimer = setTimeout(function() {
           var len = data.length - MAX_COUNT;
+          self.scrollTimer = null;
           if (len > 9) {
             util.trimLogList(data, len, self.keyword);
             self.setState({logs: data});
@@ -184,6 +184,8 @@ var Console = React.createClass({
       if (!toggleHide && !hide) {
         this.state.scrollToBottom = util.scrollAtBottom(this.container, this.content);
       }
+      clearTimeout(this.filterTimer);
+      clearTimeout(this.scrollTimer);
       return true;
     }
     return false;
@@ -194,18 +196,21 @@ var Console = React.createClass({
     }
   },
   onConsoleFilterChange: function(keyword) {
+    var self = this;
     keyword = keyword.trim();
-    this.keyword = keyword;
-    var logs = this.state.logs;
+    self.keyword = keyword;
+    var logs = self.state.logs;
     var consoleKeyword = util.parseKeyword(keyword);
     util.filterLogList(logs, consoleKeyword);
     if (!keyword) {
       var len = logs && (logs.length - MAX_COUNT);
       len > 9 && logs.splice(0, len);
     }
-    this.setState({
-      consoleKeyword: consoleKeyword
-    });
+    clearTimeout(self.filterTimer);
+    self.filterTimer = setTimeout(function() {
+      self.filterTimer = null;
+      self.setState({ consoleKeyword: consoleKeyword });
+    }, 600);
   },
   showNameInput: function(e) {
     var self = this;
@@ -307,11 +312,11 @@ var Console = React.createClass({
           </label>
           <div className="w-textarea-bar">
             <a className="w-import" onClick={this.selectFile}
-              href="javascript:;" draggable="false">Import</a>
+              draggable="false">Import</a>
             <a className={'w-download' + (disabled ? ' w-disabled' : '')} onDoubleClick={disabled ? undefined : this.download}
-              onClick={disabled ? undefined : this.showNameInput} href="javascript:;" draggable="false">Export</a>
+              onClick={disabled ? undefined : this.showNameInput} draggable="false">Export</a>
             <RecordBtn onClick={this.handleAction} />
-            <a className={'w-clear' + (disabled ? ' w-disabled' : '')} onClick={disabled ? undefined : this.clearLogs} href="javascript:;" draggable="false">Clear</a>
+            <a className={'w-clear' + (disabled ? ' w-disabled' : '')} onClick={disabled ? undefined : this.clearLogs} draggable="false">Clear</a>
             <div onMouseDown={this.preventBlur}
               style={{display: this.state.showNameInput ? 'block' : 'none'}}
               className="shadow w-textarea-input"><input ref="nameInput"
@@ -339,7 +344,7 @@ var Console = React.createClass({
             {logs.map(function(log) {
               var logId = log.logId;
               logId = logId ? ' (LogID: ' + logId + ')' : '';
-              var date = 'Date: ' + (new Date(log.date)).toLocaleString() + logId + '\r\n';
+              var date = 'Date: ' + util.toLocaleString(new Date(log.date)) + logId + '\r\n';
               var hide = (log.hide || (level && !hide && log.level !== level)) ? ' hide' : '';
               return (
                 <li key={log.id} title={log.level.toUpperCase()} className={'w-' + log.level + hide}>

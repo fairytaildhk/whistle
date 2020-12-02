@@ -6,6 +6,8 @@ var ReactDOM = require('react-dom');
 
 var util = require('./util');
 
+var HIDE = { display: 'none' };
+
 util.addDragEvent('.w-divider', function(target, x, y) {
   target = target.parent();
   var con = target.parent();
@@ -20,9 +22,17 @@ var Divider = React.createClass({
   componentDidMount: function() {
     this.reset();
   },
+  triggerDOMReady: function() {
+    if (this.__inited) {
+      return;
+    }
+    this.__inited = true;
+    this.props.onDOMReady && this.props.onDOMReady();
+  },
   reset: function() {
-    var divider = ReactDOM.findDOMNode(this.refs.divider);
-    var vertical = util.getBoolean(this.props.vertical);
+    var self = this;
+    var divider = ReactDOM.findDOMNode(self.refs.divider);
+    var vertical = util.getBoolean(self.props.vertical);
     var prop = vertical ? 'height' : 'width';
     var con = $(divider);
     var leftElem = con.children('.w-divider-left');
@@ -31,21 +41,24 @@ var Divider = React.createClass({
       height: 'auto',
       width: 'auto'
     });
-    if (this._leftWidth > 0) {
-      leftElem[prop](this._leftWidth);
+    if (self._leftWidth > 0) {
+      leftElem[prop](self._leftWidth);
+      self.triggerDOMReady();
       return;
     }
 
-    var rightWidth = parseInt(this.props.rightWidth, 10);
+    var rightWidth = parseInt(self.props.rightWidth, 10);
     if (!(rightWidth > 0)) {
       setTimeout(function() {
         rightWidth = (vertical ? divider.offsetHeight : divider.offsetWidth) / 2;
         rightElem[prop](Math.max(rightWidth, 5));
+        self.triggerDOMReady();
       }, 10);
       return;
     }
 
     rightElem[prop](Math.max(rightWidth, 5));
+    self.triggerDOMReady();
   },
   render: function() {
     var vertical = util.getBoolean(this.props.vertical);
@@ -64,7 +77,7 @@ var Divider = React.createClass({
             {leftWidth ? divider : ''}
             {this.props.children[0]}
           </div>
-          <div className={(leftWidth ? 'fill ' : '') + 'w-divider-right orient-vertical-box ' + (this.props.rightClassName || '')}>
+          <div style={this.props.hideRight ? HIDE : undefined} className={(leftWidth ? 'fill ' : '') + 'w-divider-right orient-vertical-box ' + (this.props.rightClassName || '')}>
             {leftWidth ? '' : divider}
             {this.props.children[1]}
           </div>

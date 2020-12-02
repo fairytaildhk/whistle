@@ -1,18 +1,21 @@
 require('./base-css.js');
 require('../css/req-data.css');
+require('react-virtualized/styles.css');
+
+var RV = require('react-virtualized/dist/umd/react-virtualized');
 var React = require('react');
 var ReactDOM = require('react-dom');
 var $ = require('jquery');
 var QRCodeDialog = require('./qrcode-dialog');
 var util = require('./util');
-var columns = require('./columns');
+var settings = require('./columns');
 var FilterInput = require('./filter-input');
-var Spinner = require('./spinner');
 var ContextMenu = require('./context-menu');
 var events = require('./events');
+var iframes = require('./iframes');
 var dataCenter = require('./data-center');
 
-var HEIGHT = 24;
+var ROW_STYLE = { outline: 'none'};
 var columnState = {};
 var CMD_RE = /^:dump\s+(\d{1,15})\s*$/;
 var NOT_BOLD_RULES = {
@@ -22,7 +25,9 @@ var NOT_BOLD_RULES = {
   resWrite: 1,
   reqWriteRaw: 1,
   resWriteRaw: 1,
-  responseFor: 1
+  responseFor: 1,
+  style: 1,
+  G: 1
 };
 var contextMenuList = [
   {
@@ -65,10 +70,11 @@ var contextMenuList = [
     name: 'Remove',
     list:  [
       { name: 'All' },
-      { name: 'One' },
+      { name: 'This' },
       { name: 'Others' },
       { name: 'Selected' },
       { name: 'Unselected' },
+      { name: 'Unmarked' },
       { name: 'All Such Host', action: 'removeAllSuchHost' },
       { name: 'All Such URL', action: 'removeAllSuchURL' }
     ]
@@ -86,14 +92,57 @@ var contextMenuList = [
     list: [
       { name: 'Abort' },
       { name: 'Replay' },
-      { name: 'Compose' }
+      { name: 'Compose' },
+      { name: 'Mark' }
     ]
   },
   { name: 'Share' },
   { name: 'Import' },
   { name: 'Export' },
+  {
+    name: 'Others',
+    action: 'Plugins',
+    list: []
+  },
   { name: 'Help', sep: true }
 ];
+
+function stopPropagation(e) {
+  if (!$(e.target).closest('th').next('th').length) {
+    return;
+  }
+  e.stopPropagation();
+  e.preventDefault();
+}
+
+var getFocusItemList = function(curItem) {
+  if (!curItem || curItem.selected) {
+    return;
+  }
+  return [curItem];
+};
+
+var Spinner = React.createClass({
+  render: function() {
+    var order = this.props.order;
+    var desc = order == 'desc';
+    if (!desc && order != 'asc') {
+      order = null;
+    }
+    return (
+      <div className="w-spinner">
+        <span className={'glyphicon glyphicon-triangle-top' + (order ? ' spinner-' + order : '')}></span>
+        <span className={'glyphicon glyphicon-triangle-bottom' + (order ? ' spinner-' + order : '')}></span>
+      </div>
+    );
+  }
+});
+
+function getColStyle(col, style) {
+  style = style ? $.extend({}, style) : {};
+  style.width = col.minWidth ? Math.max(col.width, col.minWidth) : col.width;
+  return style;
+}
 
 function getUploadSessionsFn() {
   try {
@@ -107,6 +156,10 @@ function getClassName(data) {
     + (data.isHttps ? ' w-tunnel' : '')
       + (hasRules(data) ? ' w-has-rules' : '')
         + (data.selected ? ' w-selected' : '');
+}
+
+function isVisible(item) {
+  return !item.hide;
 }
 
 function hasRules(data) {
@@ -153,35 +206,11 @@ function getStatusClass(data) {
     type += ' w-error-status';
   }
 
+  if (data.mark) {
+    type += ' w-mark';
+  }
+
   return type;
-}
-
-function getSelectedRows() {
-  var range = getSelection();
-  if (!range) {
-    return;
-  }
-  try {
-    range = range.getRangeAt(0);
-  } catch(e) {
-    return;
-  }
-  var startElem = $(range.startContainer).closest('.w-req-data-item');
-  if (!startElem.length) {
-    return null;
-  }
-  var endElem = $(range.endContainer).closest('.w-req-data-item');
-  if (!startElem.length || !endElem.length) {
-    return null;
-  }
-  return [startElem, endElem];
-}
-
-function getSelection() {
-  if (window.getSelection) {
-    return window.getSelection();
-  }
-  return document.getSelection();
 }
 
 function getFilename(item, type) {
@@ -202,56 +231,35 @@ function getFilename(item, type) {
 }
 
 var Row = React.createClass({
-  shouldComponentUpdate: function(nextProps) {
-    var p = this.props;
-    return p.order != nextProps.order || this.req != p.item.req || this.hide != p.item.hide ||
-    p.draggable != nextProps.draggable || p.columnList != nextProps.columnList
-    || p.startIndex != nextProps.startIndex || p.endIndex != nextProps.endIndex;
-  },
   render: function() {
     var p = this.props;
     var order = p.order;
     var draggable = p.draggable;
     var columnList = p.columnList;
-    var index = p.index;
-    var startIndex = p.startIndex;
-    var endIndex = p.endIndex;
     var item = p.item;
-    this.req = item.req;
-    this.hide = item.hide;
-    return (<tr tabIndex="-1" draggable={draggable} data-id={item.id} key={item.id} style={{display: item.hide ? 'none' : ''}}
-              className={getClassName(item)}>
-              <th className="order" scope="row">{order}</th>
-              {columnList.map(function(col) {
-                var name = col.name;
-                var className = col.className;
-                if (col.lazy && !item.hide) {
-                  var title, text;
-                  if (index >= startIndex && index <= endIndex) {
-                    if (name === 'path') {
-                      title = item.url;
-                      text = item.path;
-                    } else {
-                      text = item[name];
-                      title = col.showTitle ? text : undefined;
-                    }
-                  }
-                  return <td key={name} className={className} title={title}>{text}</td>;
-                }
-                var value = name === 'hostIp' ? util.getServerIp(item) : item[name];
-                return (<td key={name} className={className} title={col.showTitle ? value : undefined}>{value}</td>);
-              })}
-            </tr>);
+    var style = item.style;
+    return (<table  className="table" key={p.key} style={p.style}><tbody>
+              <tr tabIndex="-1" draggable={draggable} data-id={item.id} className={getClassName(item)} style={ROW_STYLE}>
+                <th className="order" scope="row" style={style}>{order}</th>
+                {columnList.map(function(col) {
+                  var name = col.name;
+                  var className = col.className;
+                  var value = name === 'hostIp' ? util.getServerIp(item) : item[name];
+                  var colStyle = getColStyle(col, style);
+                  return (<td key={name} className={className} style={colStyle} title={col.showTitle ? value : undefined}>{value}</td>);
+                })}
+              </tr>
+            </tbody></table>);
   }
 });
 
 var ReqData = React.createClass({
   getInitialState: function() {
-    var dragger = columns.getDragger();
+    var dragger = settings.getDragger();
     dragger.onDrop = dragger.onDrop.bind(this);
     return {
       draggable: true,
-      columns: columns.getSelectedColumns(),
+      columns: settings.getSelectedColumns(),
       dragger: dragger
     };
   },
@@ -262,9 +270,10 @@ var ReqData = React.createClass({
       self.setState({});
     });
     events.on('onColumnsChanged', function() {
-      self.setState({
-        columns: columns.getSelectedColumns()
-      });
+      self.setState({ columns: settings.getSelectedColumns() });
+    });
+    events.on('onColumnTitleChange', function() {
+      self.setState({});
     });
     var update = function() {
       self.setState({});
@@ -273,7 +282,7 @@ var ReqData = React.createClass({
       timer && clearTimeout(timer);
       timer = setTimeout(update, 60);
     };
-    self.container = ReactDOM.findDOMNode(self.refs.container);
+    self.container = $(ReactDOM.findDOMNode(self.refs.container));
     self.content = ReactDOM.findDOMNode(self.refs.content);
     self.$content = $(self.content).on('dblclick', 'tr', function() {
       events.trigger('showOverview');
@@ -282,16 +291,16 @@ var ReqData = React.createClass({
       var item = modal.getItem(this.getAttribute('data-id'));
       self.onClick(e, item);
     });
-    var toggoleDraggable = function(e) {
+    var toggleDraggable = function(e) {
       var draggable = !e.shiftKey;
       if (self.state.draggable === draggable) {
         return;
       }
       self.setState({ draggable: draggable });
     };
-    $(self.container).on('keydown', function(e) {
+    self.container.on('keydown', function(e) {
       var modal = self.props.modal;
-      toggoleDraggable(e);
+      toggleDraggable(e);
       if (!modal) {
         return;
       }
@@ -306,72 +315,80 @@ var ReqData = React.createClass({
         self.onClick(e, item, true);
         e.preventDefault();
       }
-    }).on('scroll', render).on('keyup', toggoleDraggable)
-    .on('mouseover', toggoleDraggable)
-    .on('mouseleave', toggoleDraggable);
+    }).on('scroll', render).on('keyup', toggleDraggable)
+    .on('mouseover', toggleDraggable)
+    .on('mouseleave', toggleDraggable);
 
     $(window).on('resize', render);
+    events.on('ensureSelectedItemVisible', function () {
+      var modal = self.props.modal;
+      var selected =  modal && modal.getSelectedList()[0];
+      if(selected){
+        self.scrollToRow(selected);
+      }else{
+        self.scrollToRow(0);
+      }
+    });
+    events.on('focusNetworkList', function() {
+      self.container.focus();
+    });
+    var wrapper = ReactDOM.findDOMNode(self.refs.wrapper);
+    var updateTimer;
+    var updateUI = function() {
+      updateTimer = null;
+      self.setState({ columns: settings.getSelectedColumns() });
+    };
+    util.addDragEvent('.w-header-drag-block', function(_, x) {
+      self.minWidth = wrapper.offsetWidth + x;
+      settings.setMinWidth(self.minWidth);
+      updateTimer = updateTimer || setTimeout(updateUI, 50);
+    });
   },
   onDragStart: function(e) {
     var target = $(e.target).closest('.w-req-data-item');
-    e.dataTransfer.setData('reqDataId', target.attr('data-id'));
+    var dataId = target.attr('data-id');
+    dataId && e.dataTransfer.setData('reqDataId', dataId);
+  },
+  getSelectedRows: function (item) {
+    var modal = this.props.modal;
+    var active = modal.getActive();
+    if (!active || item === active) {
+      return;
+    }
+    return [active, item];
   },
   onClick: function(e, item, hm) {
     var self = this;
     var modal = self.props.modal;
-    var resetRange = function() {
-      var range = window.getSelection();
-      if (range) {
-        range.removeAllRanges();
-        var target = e.target;
-        var row = $(target).closest('.w-req-data-item')[0];
-        if (row) {
-          var draggable = row.draggable;
-          row.draggable = false;
-          var r = document.createRange();
-          r.selectNodeContents(target);
-          range.addRange(r);
-          if (draggable) {
-            row.draggable = true;
-          }
-        }
-      }
-      return range;
-    };
     var rows;
-    if (e.shiftKey) {
-      rows = getSelectedRows();
-      !rows && resetRange();
-    } else {
-      resetRange();
-    }
     var allowMultiSelect = e.ctrlKey || e.metaKey;
-    if (hm || !allowMultiSelect) {
-      self.clearSelection();
-    }
-    self.$content.find('tr.w-selected').removeClass('w-selected');
     if (hm) {
+      self.clearSelection();
+      this.$content.find('tr.w-selected').removeClass('w-selected');
       item.selected = true;
       self.setSelected(item);
+    } else if (e.shiftKey && (rows = self.getSelectedRows(item))) {
+      this.$content.find('tr.w-selected').removeClass('w-selected');
+      modal.setSelectedList(rows[0], rows[1], self.setSelected);
     } else {
-      rows;
-      if (e.shiftKey && (rows = getSelectedRows())) {
-        modal.setSelectedList(rows[0].attr('data-id'),
-            rows[1].attr('data-id'), self.setSelected.bind(self));
-      } else {
-        item.selected = !allowMultiSelect || !item.selected;
-        self.setSelected(item);
+      if (!allowMultiSelect) {
+        this.$content.find('tr.w-selected').removeClass('w-selected');
+        self.clearSelection();
       }
+      item.selected = !allowMultiSelect || !item.selected;
+      self.setSelected(item, true);
     }
 
     modal.clearActive();
-    item.active = true;
-    hm && util.ensureVisible(this.$content.find('tr[data-id=' + item.id + ']'), self.container);
+    item.active = item.selected;
+    hm && self.scrollToRow(item);
     events.trigger('networkStateChange');
   },
-  setSelected: function(item) {
+  setSelected: function(item, unselect) {
     if (item.selected) {
       this.$content.find('tr[data-id=' + item.id + ']').addClass('w-selected');
+    } else if (unselect) {
+      this.$content.find('tr[data-id=' + item.id + ']').removeClass('w-selected');
     }
   },
   clearSelection: function() {
@@ -448,10 +465,10 @@ var ReqData = React.createClass({
     this.onClick('', item, true);
     events.trigger('networkStateChange');
   },
-  onClickContextMenu: function(action, e) {
+  onClickContextMenu: function(action, e, parentAction, name) {
     var self = this;
     var item = self.currentFocusItem;
-    switch(action) {
+    switch(parentAction || action) {
     case 'New Tab':
       item && window.open(item.url);
       break;
@@ -479,6 +496,16 @@ var ReqData = React.createClass({
       break;
     case 'Compose':
       events.trigger('composer', item);
+      break;
+    case 'Mark':
+      var modal = this.props.modal;
+      var list = getFocusItemList(item) || (modal && modal.getSelectedList());
+      if (list) {
+        list.forEach(function(item) {
+          item.mark = !item.mark;
+        });
+      }
+      this.setState({});
       break;
     case 'Replay':
       events.trigger('replaySessions', [item, e.shiftKey]);
@@ -553,7 +580,7 @@ var ReqData = React.createClass({
     case 'excludeUrl':
       item && self.removeAllSuchURL(item);
       break;
-    case 'One':
+    case 'This':
       events.trigger('removeIt', item);
       break;
     case 'All':
@@ -568,8 +595,20 @@ var ReqData = React.createClass({
     case 'Unselected':
       events.trigger('removeUnselected');
       break;
+    case 'Unmarked':
+      events.trigger('removeUnmarked');
+      break;
     case 'Help':
       window.open('https://avwo.github.io/whistle/webui/network.html');
+      break;
+    case 'Plugins':
+      iframes.fork(action, {
+        port: dataCenter.getPort(),
+        type: 'network',
+        name: name,
+        activeItem: item,
+        selectedList: self.props.modal.getSelectedList()
+      });
       break;
     }
   },
@@ -659,9 +698,10 @@ var ReqData = React.createClass({
     list3[2].disabled = disabled || selectedCount === hasData;
     list3[3].disabled = !selectedCount;
     list3[4].disabled = selectedCount === hasData;
-    list3[5].disabled = disabled;
+    list3[5].disabled = !modal.hasUnmarked();
     list3[6].disabled = disabled;
-    
+    list3[7].disabled = disabled;
+
     var list4 = contextMenuList[4].list;
     list4[1].disabled = disabled;
     list4[2].disabled = disabled;
@@ -670,6 +710,7 @@ var ReqData = React.createClass({
     var list5 = contextMenuList[5].list;
     if (item) {
       list5[2].disabled = false;
+      list5[3].disabled = false;
       if (item.selected) {
         list5[1].disabled = !selectedList.filter(util.canReplay).length;
         list5[0].disabled = !selectedList.filter(util.canAbort).length;
@@ -681,25 +722,30 @@ var ReqData = React.createClass({
       list5[0].disabled = true;
       list5[1].disabled = true;
       list5[2].disabled = true;
+      list5[3].disabled = true;
     }
-    
     var uploadItem = contextMenuList[6];
     uploadItem.hide = !getUploadSessionsFn();
-    contextMenuList[8].disabled = uploadItem.disabled = disabled && !selectedCount;
-    var data = util.getMenuPosition(e, 110, uploadItem.hide ? 280 : 310);
+    contextMenuList[9].disabled = uploadItem.disabled = disabled && !selectedCount;
+    var pluginItem = contextMenuList[9];
+    util.addPluginMenus(pluginItem, dataCenter.getNetworkMenus(), uploadItem.hide ? 8 : 9, disabled);
+    var height = (uploadItem.hide ? 310 : 340) - (pluginItem.hide ? 30 : 0);
+    pluginItem.maxHeight = height;
+    var data = util.getMenuPosition(e, 110, height);
     data.list = contextMenuList;
-    data.className = data.marginRight < 260 ? 'w-ctx-menu-left' : '';
+    data.className = data.marginRight < 360 ? 'w-ctx-menu-left' : '';
     this.refs.contextMenu.show(data);
+  },
+  updateList: function() {
+    this.refs.content.refs.list.forceUpdateGrid();
   },
   onFilterChange: function(keyword) {
     var self = this;
     var modal = self.props.modal;
-    var autoRefresh = modal && modal.search(keyword);
-    self.setState({filterText: keyword}, function() {
-      autoRefresh && self.autoRefresh();
-    });
+    modal && modal.search(keyword);
     clearTimeout(self.networkStateChangeTimer);
     self.networkStateChangeTimer = setTimeout(function() {
+      self.setState({filterText: keyword}, self.updateList);
       events.trigger('networkStateChange');
     }, 600);
   },
@@ -714,11 +760,11 @@ var ReqData = React.createClass({
   },
   autoRefresh: function() {
     if (this.container) {
-      this.container.scrollTop = this.content.offsetHeight;
+      this.container.find('.ReactVirtualized__Grid:first').scrollTop = 100000000;
     }
   },
   orderBy: function(e) {
-    var target = $(e.target).closest('th')[0];
+    var target = this.willResort && $(e.target).closest('th')[0];
     if (!target) {
       return;
     }
@@ -753,64 +799,76 @@ var ReqData = React.createClass({
     this.setState({});
   },
   onColumnsResort: function() {
-    this.setState({ columns: columns.getSelectedColumns() });
+    this.setState({ columns: settings.getSelectedColumns() });
   },
-  getVisibleIndex: function() {
-    var container = this.container;
-    var len = container && this.props.modal && this.props.modal.list.length;
-    var height = len && container.offsetHeight;
-    if (height) {
-      var scrollTop = container.scrollTop;
-      var startIndex = Math.floor(Math.max(scrollTop - 240, 0) / HEIGHT);
-      var endIndex = Math.floor(Math.max(scrollTop + height + 240, 0) / HEIGHT);
-      this.indeies = [startIndex, endIndex];
+  onMouseDown: function(e) {
+    this.willResort = e.target.className !== 'w-header-drag-block';
+  },
+  onReplay: function(e) {
+    if (!e.metaKey && !e.ctrlKey) {
+      return;
     }
-
-    return this.indeies;
+    if (e.keyCode === 82) {
+      events.trigger('replaySessions', [null, e.shiftKey]);
+    } else if (e.keyCode === 65) {
+      e.preventDefault();
+      events.trigger('abortRequest');
+    } else if (e.keyCode === 69) {
+      e.preventDefault();
+      events.trigger('composer');
+    }
   },
-  renderColumn: function(col) {
+  renderColumn: function(col, i) {
     var name = col.name;
-    var disabledColumns = columns.isDisabled();
+    var style = getColStyle(col);
+    if (columnState[name]) {
+      style.color = '#337ab7';
+    }
+    var title;
+    if (name === 'custom1' || name === 'custom2') {
+      title = dataCenter[name];
+    } else {
+      title = col.title;
+    }
     return (
-      <th {...this.state.dragger} data-name={name}
-        draggable={!disabledColumns}
-        key={name} className={col.className}
-        style={{color: columnState[name] ? '#337ab7' : undefined}}>
-        {col.title}<Spinner order={columnState[name]} />
+      <th onMouseDown={this.onMouseDown} {...this.state.dragger} data-name={name}
+        draggable={true} key={name} className={col.className} style={style}
+      >
+        { name === 'path' ? <div onDragStart={stopPropagation} draggable={true} className="w-header-drag-block" /> : undefined}
+        {title}<Spinner order={columnState[name]} />
       </th>
     );
   },
+
+  scrollToRow: function(target){
+    if(target && target.id){
+      target = this.props.modal.list.filter(isVisible).indexOf(target);
+    }
+    this.refs.content.refs.list.scrollToRow(target);
+    this.container.focus();
+  },
+
   render: function() {
     var self = this;
     var state = this.state;
     var modal = self.props.modal;
-    var list = modal ? modal.list : [];
+    var list = modal ? modal.list.filter(isVisible) : [];
     var hasKeyword = modal && modal.hasKeyword();
     var index = 0;
-    var indeies = self.getVisibleIndex();
     var draggable = state.draggable;
-    var columnList = state.columns;
+    var columnList = state.columns.list;
+    var width = state.columns.width;
+    var colStyle = state.columns.style;
     var filterText = (state.filterText || '').trim();
-    var minWidth = 50;
-    var startIndex, endIndex;
-
-    if (indeies) {
-      startIndex = indeies[0];
-      endIndex = indeies[1];
-    } else {
-      startIndex = 0;
-      endIndex = list.length;
+    var minWidth = settings.getMinWidth();
+    if (minWidth && minWidth > width) {
+      width = minWidth;
+      colStyle.minWidth = width;
     }
-
-    // reduce
-    for (var i = 0, len = columnList.length; i < len; i++) {
-      minWidth += columnList[i].minWidth;
-    }
-    minWidth = {'min-width': minWidth + 'px'};
 
     return (
         <div className="fill w-req-data-con orient-vertical-box">
-          <div style={minWidth} className="w-req-data-content fill orient-vertical-box">
+          <div ref="wrapper" className="w-req-data-content fill orient-vertical-box" style={colStyle}>
             <div className="w-req-data-headers">
               <table className="table">
                   <thead>
@@ -821,25 +879,31 @@ var ReqData = React.createClass({
                   </thead>
                 </table>
             </div>
-            <div ref="container" tabIndex="0" onContextMenu={self.onContextMenu}
+            <div ref="container" tabIndex="0" onContextMenu={self.onContextMenu} onKeyDown={this.onReplay}
               style={{background: (dataCenter.hashFilterObj || filterText) ? 'lightyellow' : undefined}}
-              className="w-req-data-list fill">
-              <table ref="content" className="table" onDragStart={this.onDragStart}>
-                  <tbody>
-                  {
-                    list.map(function(item, i) {
-                      i = hasKeyword ? index : i;
-                      var order = hasKeyword && !item.hide ? ++index : item.order;
-                      return <Row order={order} startIndex={startIndex} endIndex={endIndex} index={i}
-                        columnList={columnList} draggable={draggable} item={item} />;
-                    })
-                  }
-                  </tbody>
-                </table>
+              className="w-req-data-list fill"  onDragStart={this.onDragStart}>
+                <RV.AutoSizer ref="content" >{function(size){
+                  return (
+                      <RV.List
+                      ref="list"
+                      rowHeight={28}
+                      width={size.width}
+                      height={size.height}
+                      rowCount={list.length}
+                      rowRenderer={function(options){
+                        // var {index, isScrolling, key, style}=options;
+                        var item = list[options.index];
+                        var order = hasKeyword? options.index+1 : item.order;
+                        return <Row style={options.style} key={options.key} order={order}  index={index}
+                          columnList={columnList} draggable={draggable} item={item} />;
+                      }}
+                      />);
+                }}
+                </RV.AutoSizer>
             </div>
           </div>
           <FilterInput ref="filterInput" onKeyDown={this.onFilterKeyDown}
-            onChange={this.onFilterChange} wStyle={minWidth} />
+            onChange={this.onFilterChange} wStyle={colStyle} hintKey="networkHintList" />
           <ContextMenu onClick={this.onClickContextMenu} ref="contextMenu" />
           <QRCodeDialog ref="qrcodeDialog" />
       </div>

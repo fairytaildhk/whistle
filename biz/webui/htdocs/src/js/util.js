@@ -4,6 +4,7 @@ var fromByteArray  = require('base64-js').fromByteArray;
 var jsBase64 = require('js-base64').Base64;
 var base64Decode = jsBase64.decode;
 var base64Encode = jsBase64.encode;
+var toBase64 = jsBase64.toBase64;
 var json2 = require('./components/json');
 var evalJson = require('./components/json/eval');
 var isUtf8 = require('./is-utf8');
@@ -21,6 +22,16 @@ function noop(_) {
 }
 
 exports.noop = noop;
+
+function compare(v1, v2) {
+  return v1 == v2 ? 0 : (v1 > v2 ? -1 : 1);
+}
+
+exports.compare = compare;
+
+exports.isString = function(str) {
+  return typeof str === 'string';
+};
 
 function notEStr(str) {
   return str && typeof str === 'string';
@@ -90,16 +101,20 @@ exports.getBase64FromHexText = function (str, check) {
   return false;
 };
 
+function stopDrag() {
+  dragCallback = dragTarget = dragOffset = null;
+}
+
 $(document).on('mousedown', function(e) {
   stopDrag();
   var target = $(e.target);
-  Object.keys(dragCallbacks).forEach(function(selector) {
+  Object.keys(dragCallbacks).some(function(selector) {
     dragTarget = target.closest(selector);
     if (dragTarget.length) {
       dragCallback = dragCallbacks[selector];
-      return false;
+      return true;
     }
-    stopDrag();
+    dragTarget = null;
   });
 
   if (!dragTarget || !dragCallback) {
@@ -120,10 +135,6 @@ $(document).on('mousedown', function(e) {
 .on('mouseout', function(e) {
   !e.relatedTarget && stopDrag();
 });
-
-function stopDrag() {
-  dragCallback = dragTarget = dragOffset = null;
-}
 
 function addDragEvent(selector, callback) {
   if (!selector || typeof callback != 'function'
@@ -187,21 +198,27 @@ function getProperty(obj, name, defaultValue) {
 
 exports.getProperty = getProperty;
 
-var filterEmptyStr = function(item) {
-  return item.trim();
-};
-
 function getServerIp(modal) {
   var ip = modal.hostIp;
-  if (!modal.serverIp && ip) {
-    var realEnv = decodeURIComponentSafe(getProperty(modal, 'res.headers.x-whistle-response-for'));
+  if (!ip) {
+    return modal.serverIp;
+  }
+  if (modal.realIp) {
+    modal.serverIp = modal.realIp + ', ' + ip;
+    delete modal.realIp;
+  } else if (!modal.serverIp) {
+    var res = modal.res || '';
+    if (res.phost && res.phost != ip) {
+      ip = res.phost + ', ' + ip;
+    }
+    var realEnv = decodeURIComponentSafe(getProperty(res, 'headers.x-whistle-response-for'));
     if (realEnv) {
       if (realEnv !== ip && realEnv.trim().split(/\s*,\s*/).indexOf(ip) === -1) {
-        ip = realEnv + ',' + ip;
+        ip = realEnv + ', ' + ip;
       } else {
         ip = realEnv;
       }
-      modal.serverIp = ip.split(',').filter(filterEmptyStr).join(', ');
+      modal.serverIp = ip.trim().split(/\s*,\s*/).filter(noop).join(', ');
     }
   }
   return modal.serverIp || ip;
@@ -312,7 +329,11 @@ function getHost(url) {
   return url;
 }
 
-exports.hasBody = function hasBody(res) {
+var HEAD_RE = /^head$/i;
+exports.hasBody = function hasBody(res, req) {
+  if (req && HEAD_RE.test(req.method)) {
+    return false;
+  }
   var statusCode = res.statusCode;
   return !(statusCode == 204 || (statusCode >= 300 && statusCode < 400) ||
     (100 <= statusCode && statusCode <= 199));
@@ -366,6 +387,7 @@ exports.ensureVisible = function(elem, container, init) {
 
 exports.parseQueryString = function(str, delimiter, seperator, decode, donotAllowRepeat) {
   var result = {};
+  window.___hasFormData = false;
   if (!str || !(str = (str + '').trim())) {
     return result;
   }
@@ -397,6 +419,7 @@ exports.parseQueryString = function(str, delimiter, seperator, decode, donotAllo
       } else {
         result[key] = value;
       }
+      window.___hasFormData = true;
     }
   });
   return result;
@@ -435,6 +458,9 @@ function getContentEncoding(headers) {
 exports.getOriginalReqHeaders = function(item) {
   var req = item.req;
   var headers = $.extend({}, req.headers, item.rulesHeaders, true);
+  if (item.clientId && !headers['x-whistle-client-id']) {
+    headers['x-whistle-client-id'] = item.clientId;
+  }
   if (getContentEncoding(headers)) {
     delete headers['content-encoding'];
   }
@@ -701,7 +727,7 @@ exports.getMenuPosition = function(e, menuWidth, menuHeight) {
   if (left + menuWidth - window.scrollX >= clientWidth) {
     left = Math.max(left - menuWidth, window.scrollX + 1);
   }
-  if (top + menuHeight - window.scrollY >= docElem.clientHeight) {
+  if (top + menuHeight - window.scrollY >= docElem.clientHeight - 25) {
     top = Math.max(top - menuHeight, window.scrollY + 1);
   }
   return { top: top, left: left, marginRight: clientWidth - left };
@@ -843,6 +869,26 @@ exports.trimLogList = function(list, overflow, hasKeyword) {
   overflow > 0 && list.splice(0, overflow);
   return list;
 };
+
+var TIME_RE = /\b\d\d?:\d\d?:\d\d?\b/;
+
+function toLocaleString(date) {
+  var str = date.toLocaleString();
+  if (!TIME_RE.test(str)) {
+    return str;
+  }
+  var time = RegExp['$&'];
+  var ms = date.getTime() % 1000;
+  if (ms < 10) {
+    ms = '00' + ms;
+  } else if (ms < 100) {
+    ms = '0' + ms;
+  }
+  return str.replace(time, time + '.' + ms);
+}
+
+exports.toLocaleString = toLocaleString;
+
 exports.filterLogList = function(list, keyword) {
   if (!list) {
     return;
@@ -856,7 +902,7 @@ exports.filterLogList = function(list, keyword) {
     if (level && log.level !== level) {
       log.hide = true;
     } else {
-      var text = 'Date: ' + (new Date(log.date)).toLocaleString() + log.logId + '\r\n' + log.text;
+      var text = 'Date: ' + toLocaleString(new Date(log.date)) + log.logId + '\r\n' + log.text;
       log.hide = checkLogText(text, keyword);
     }
   });
@@ -1022,6 +1068,10 @@ function getHexFromBase64(base64) {
 
 exports.getHexFromBase64 = getHexFromBase64;
 
+function getClosedMsg(data) {
+  return 'Closed' + (data.code ? ' (' + data.code + ')' : '');
+}
+
 function initData(data, isReq) {
   if ((data[BODY_KEY] && data[HEX_KEY])) {
     return;
@@ -1029,7 +1079,7 @@ function initData(data, isReq) {
   if (!data.base64) {
     var body = data.body || data.text;
     if (data.closed || data.err) {
-      body = String(data.err || 'Closed');
+      body = String(data.err || getClosedMsg(data));
     }
     if (body) {
       try {
@@ -1175,13 +1225,10 @@ function hasRequestBody(method) {
 
 exports.hasRequestBody = hasRequestBody;
 
-var NON_LATIN1_RE = /[^\x00-\xFF]/g;
+var NON_LATIN1_RE = /([^\x00-\xFF]|[\r\n%])/g;
 exports.encodeNonLatin1Char = function(str) {
-  if (!str || typeof str != 'string') {
-    return '';
-  }
   /*eslint no-control-regex: "off"*/
-  return  str && str.replace(NON_LATIN1_RE, safeEncodeURIComponent);
+  return str && typeof str === 'string' ? str.replace(NON_LATIN1_RE, safeEncodeURIComponent) : '';
 };
 
 function formatSemer(ver) {
@@ -1229,16 +1276,45 @@ exports.getHexText = function (text) {
   return text.split('\n').map(getHexLine).join('\n');
 };
 
+var curPageName;
 function triggerPageChange(name) {
   try {
     var onPageChange = window.parent.onWhistlePageChange;
-    if (typeof onPageChange === 'function') {
+    if (typeof onPageChange === 'function' && curPageName !== name) {
+      curPageName = name;
       onPageChange(name, location.href);
     }
   } catch (e) {}
 }
 
 exports.triggerPageChange = triggerPageChange;
+
+var curActiveRules;
+exports.triggerRulesActiveChange = function(name) {
+  if (curActiveRules === name) {
+    return;
+  }
+  curActiveRules = name;
+  try {
+    var onChange = window.parent.onWhistleRulesActiveChange;
+    if (typeof onChange === 'function') {
+      onChange(name, location.href);
+    }
+  } catch (e) {}
+};
+var curActiveValues;
+exports.triggerValuesActiveChange = function(name) {
+  if (curActiveValues === name) {
+    return;
+  }
+  curActiveValues = name;
+  try {
+    var onChange = window.parent.onWhistleValuesActiveChange;
+    if (typeof onChange === 'function') {
+      onChange(name, location.href);
+    }
+  } catch (e) {}
+};
 
 function changePageName(name) {
   var hash = location.hash.substring(1);
@@ -1277,7 +1353,11 @@ function readFile(file, callback, type) {
   reader.onload = function () {
     var result = reader.result;
     try {
-      execCallback(null, isText ? result : fromByteArray(new window.Uint8Array(result)));
+      if (!isText) {
+        result = new window.Uint8Array(result);
+        result = type === 'base64' ? fromByteArray(result) : result;
+      }
+      execCallback(null, result);
     } catch(e) {
       execCallback(e);
     }
@@ -1285,10 +1365,303 @@ function readFile(file, callback, type) {
   return reader;
 }
 
+exports.readFile = readFile;
+
 exports.readFileAsBase64 = function(file, callback) {
-  return readFile(file, callback);
+  return readFile(file, callback, 'base64');
 };
 
 exports.readFileAsText = function(file, callback) {
   return readFile(file, callback, 'text');
 };
+
+exports.addPluginMenus = function(item, list, maxTop, disabled) {
+  var pluginsList = item.list = list;
+  var count = pluginsList.length;
+  if (count) {
+    item.hide = false;
+    var disabledOthers = disabled;
+    for (var j = 0; j < count; j++) {
+      var plugin = pluginsList[j];
+      if (plugin.required) {
+        plugin.disabled = disabled;
+        if (!disabled) {
+          disabledOthers = false;
+        }
+      } else {
+        disabledOthers =  plugin.disabled = false;
+      }
+    }
+    var top = count - 2;
+    item.top = top > 0 ? Math.min(maxTop, top) : undefined;
+    item.disabled = disabledOthers;
+  } else {
+    item.hide = true;
+  }
+};
+
+exports.parseImportData = function(data, modal, isValues) {
+  var list = [];
+  var hasConflict;
+  Object.keys(data).forEach(function(name) {
+    var value = data[name];
+    if (value == null) {
+      return;
+    }
+    if (isValues) {
+      if (typeof value === 'object') {
+        try {
+          value = JSON.stringify(value, null, '  ');
+        } catch(e) {
+          return;
+        }
+      } else {
+        value = value + '';
+      }
+    }if (typeof value !== 'string') {
+      return;
+    }
+    var isConflict;
+    var item = modal && modal.get(name);
+    if (item) {
+      isConflict = item.value && item.value != value;
+      hasConflict = hasConflict || isConflict;
+    }
+    list.push({
+      name: name,
+      value: value,
+      isConflict: isConflict
+    });
+  });
+  list.hasConflict = hasConflict;
+  return list;
+};
+
+exports.getSize = function(size) {
+  if (size < 1024) {
+    return size;
+  }
+  size = (size / 1024).toFixed(2);
+  if (size < 1024) {
+    return size + 'k';
+  }
+  size = (size / 1024).toFixed(2);
+  if (size < 1024) {
+    return size + 'm';
+  }
+  return (size / 1024).toFixed(2) + 'G';
+};
+
+
+function indexOfList(list, subList, start) {
+  var len = list.length;
+  var subLen = subList && subList.length;
+  if (!len || !subLen) {
+    return -1;
+  }
+  var first = subList[0];
+  var index = list.indexOf(first, start || 0);
+  if (subLen === 1) {
+    return index;
+  }
+  var result = -1;
+  while (index !== -1) {
+    result = index;
+    for (var i = 0; i < subLen; i++) {
+      if (subList[i] !== list[i + index]) {
+        result = -1;
+        index = list.indexOf(first, index + 1);
+        break;
+      }
+    }
+    if (result !== -1) {
+      return result;
+    }
+  }
+  return result;
+}
+
+function concatByteArray(list1, list2, list3) {
+  var len = list1.length;
+  var len2 = list2.length;
+  var result = new window.Uint8Array(len + len2 + (list3 ? list3.length : 0));
+  result.set(list1);
+  result.set(list2, len);
+  list3 && result.set(list3, len + len2);
+  return result;
+}
+
+function strToByteArray(str) {
+  try {
+    str = toBase64(str);
+    return toByteArray(str);
+  } catch (e) {}
+  return null;
+}
+
+function base64ToByteArray(str) {
+  try {
+    return toByteArray(str);
+  } catch (e) {}
+  return null;
+}
+
+var UPLOAD_TYPE_RE = /^\s*multipart\//i;
+var BOUNDARY_RE = /boundary=(?:"([^"]+)"|([^;]+))/i;
+var BODY_SEP = strToByteArray('\r\n\r\n');
+var NAME_RE = /name=(?:"([^"]+)"|([^;]+))/i;
+var FILENAME_RE = /filename=(?:"([^"]+)"|([^;]+))/i;
+var TYPE_RE = /^\s*content-type:\s*([^\s]+)/i;
+var CRLF_BUF = strToByteArray('\r\n');
+
+function parseMultiHeader(header) {
+  try {
+    header = base64Decode(fromByteArray(header)).split('\r\n');
+  } catch (e) {
+    return;
+  }
+  if (!NAME_RE.test(header[0])) {
+    return;
+  }
+  var result = {
+    name: RegExp.$1 || RegExp.$2,
+    value: ''
+  };
+  if (TYPE_RE.test(header[1])) {
+    result.type = RegExp.$1;
+    var index = header[0].indexOf('name=' + RegExp['$&']);
+    if (FILENAME_RE.test(header[0].substring(index + 1))) {
+      result.value = RegExp.$1 || RegExp.$2;
+    }
+  }
+  return result;
+}
+
+exports.isUploadForm = function(req) {
+  var type = req.headers && req.headers['content-type'];
+  return UPLOAD_TYPE_RE.test(type);
+};
+
+function parseUploadBody(body, boundary) {
+  var sep = '--' + boundary;
+  var start = strToByteArray(sep + '\r\n');
+  var end = strToByteArray('\r\n' + sep );
+  var len = start.length;
+  var index = indexOfList(body, start);
+  var result = [];
+  while(index >= 0) {
+    index += len;
+    var hIndex = indexOfList(body, BODY_SEP, index);
+    if (hIndex === -1) {
+      return result;
+    }
+    var endIndex = indexOfList(body, end, hIndex + 2);
+    if (endIndex === -1) {
+      return result;
+    }
+    var header = body.slice(index, hIndex);
+    hIndex += 4;
+    var data = hIndex >= endIndex ? '' : body.slice(hIndex, endIndex);
+    header = parseMultiHeader(header);
+    if (header) {
+      if (header.type) {
+        header.data = data;
+      } else {
+        try {
+          header.value = data && base64Decode(fromByteArray(data));
+        } catch (e) {}
+      }
+      result.push(header);
+    }
+    index = indexOfList(body, start, endIndex + 2);
+  }
+
+  return result;
+}
+
+exports.parseUploadBody = function(req) {
+  if (!req.base64) {
+    return;
+  }
+  var type = req.headers && req.headers['content-type'];
+  if (!BOUNDARY_RE.test(type)) {
+    return;
+  }
+  var boundary = RegExp.$1 || RegExp.$2;
+  var body = base64ToByteArray(req.base64);
+  return body && parseUploadBody(body, boundary);
+};
+
+function getMultiPart(part) {
+  var header = 'Content-Disposition: form-data; name="' + part.name + '"';
+  var data = part.data;
+  if (data) {
+    header += '; filename="' + part.value + '"';
+    if (part.type) {
+      header += '\r\nContent-Type: ' + part.type;
+    }
+  } else {
+    data = part.value && strToByteArray(part.value);
+  }
+  if (!header) {
+    return;
+  }
+  header = strToByteArray(header + '\r\n\r\n');
+  return data ? concatByteArray(header, data, CRLF_BUF) : header;
+}
+
+function getBoundary() {
+  return '----WhistleUploadForm' + Date.now().toString(16) + Math.floor(Math.random() * 100000000000).toString(16);
+}
+
+var base64abc = [
+  'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
+  'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+  'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
+  'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+  '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '/'
+];
+
+function bytesToBase64(bytes) {
+  var result = '';
+  var i;
+  var l = bytes.length;
+  for (i = 2; i < l; i += 3) {
+    result += base64abc[bytes[i - 2] >> 2];
+    result += base64abc[((bytes[i - 2] & 0x03) << 4) | (bytes[i - 1] >> 4)];
+    result += base64abc[((bytes[i - 1] & 0x0F) << 2) | (bytes[i] >> 6)];
+    result += base64abc[bytes[i] & 0x3F];
+  }
+  if (i === l + 1) { // 1 octet yet to write
+    result += base64abc[bytes[i - 2] >> 2];
+    result += base64abc[(bytes[i - 2] & 0x03) << 4];
+    result += '==';
+  }
+  if (i === l) { // 2 octets yet to write
+    result += base64abc[bytes[i - 2] >> 2];
+    result += base64abc[((bytes[i - 2] & 0x03) << 4) | (bytes[i - 1] >> 4)];
+    result += base64abc[(bytes[i - 1] & 0x0F) << 2];
+    result += '=';
+  }
+  return result;
+}
+
+exports.getMultiBody = function(fields) {
+  var result;
+  var boundary = getBoundary();
+  var boundBuf = strToByteArray('--' + boundary + '\r\n');
+  fields.forEach(function(field) {
+    field = getMultiPart(field);
+    if (field) {
+      field = concatByteArray(boundBuf, field);
+      result = result ? concatByteArray(result, field) : field;
+    }
+  });
+  result = result && concatByteArray(result, strToByteArray('--' + boundary + '--'));
+  return {
+    boundary: boundary,
+    length: result ? result.length : 0,
+    base64: result && bytesToBase64(result)
+  };
+};
+

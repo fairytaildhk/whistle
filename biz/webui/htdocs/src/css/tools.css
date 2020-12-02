@@ -93,7 +93,7 @@
 
 .w-log-expand-root input {
   margin-right: 5px;
-  vertical-align: sub;
+  vertical-align:text-bottom;
 }
 
 .w-tool-box-ctn {

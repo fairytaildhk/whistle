@@ -30,6 +30,12 @@ function createDialog() {
   return dialog;
 }
 
+function addIndent(list) {
+  return list.map(function(ip) {
+    return '  ' + ip;
+  });
+}
+
 var Online = React.createClass({
   getInitialState: function() {
     return {};
@@ -61,10 +67,12 @@ var Online = React.createClass({
       this.version = data.version;
       this.baseDir = data.baseDir;
       this.networkMode = data.networkMode;
+      this.pluginsMode = data.pluginsMode;
+      this.rulesMode = data.rulesMode;
       this.multiEnv = data.multiEnv;
-    } else if (this.macAddr !== data.mac || this.version !== data.version
-      || this.baseDir !== data.baseDir || this.networkMode !== data.networkMode
-      || this.multiEnv !== data.multiEnv) {
+    } else if (this.version !== data.version || this.baseDir !== data.baseDir
+      || this.networkMode !== data.networkMode || this.pluginsMode !== data.pluginsMode
+      || this.rulesMode !== data.rulesMode || this.multiEnv !== data.multiEnv) {
       this.refs.confirmReload.show();
     } else {
       this.refs.confirmReload.hide();
@@ -90,14 +98,27 @@ var Online = React.createClass({
     if (host) {
       info.push('<h5><strong>Host:</strong> ' + host + '</h5>');
     }
+    if (server.pid) {
+      info.push('<h5><strong>PID:</strong> ' + server.pid + '</h5>');
+    }
     if (server.nodeVersion) {
       info.push('<h5><strong>Node:</strong> ' + server.nodeVersion + '</h5>');
     }
     if (server.version) {
       info.push('<h5><strong>Whistle:</strong> v' + server.version + '</h5>');
     }
-    if (server.port) {
-      info.push('<h5><strong>Port:</strong> ' + server.port + '</h5>');
+    var port = server.realPort || server.port;
+    if (port) {
+      info.push('<h5><strong>Port:</strong> ' + port + '</h5>');
+    }
+    if (server.socksPort) {
+      info.push('<h5><strong>SOCKS Port:</strong> ' + server.socksPort + '</h5>');
+    }
+    if (server.httpPort) {
+      info.push('<h5><strong>HTTP Port:</strong> ' + server.httpPort + '</h5>');
+    }
+    if (server.httpsPort) {
+      info.push('<h5><strong>HTTPS Port:</strong> ' + server.httpsPort + '</h5>');
     }
     if (server.ipv4.length) {
       info.push('<h5><strong>IPv4:</strong></h5>');
@@ -120,22 +141,34 @@ var Online = React.createClass({
       if (server.host) {
         info.push('Host: ' + server.host);
       }
-
-      if (server.port) {
-        info.push('Port: ' + server.port);
+      if (server.pid) {
+        info.push('PID: ' + server.pid);
+      }
+      var port = server.realPort || server.port;
+      if (port) {
+        info.push('Port: ' + port);
+      }
+      if (server.socksPort) {
+        info.push('SOCKS Port: ' + server.socksPort);
+      }
+      if (server.httpPort) {
+        info.push('HTTP Port: ' + server.httpPort);
+      }
+      if (server.httpsPort) {
+        info.push('HTTPS Port: ' + server.httpsPort);
       }
 
       if (server.ipv4.length) {
         info.push('IPv4:');
-        info.push.apply(info, server.ipv4);
+        info.push.apply(info, addIndent(server.ipv4));
       }
-      if (server.ipv4.length) {
+      if (server.ipv6.length) {
         info.push('IPv6:');
-        info.push.apply(info, server.ipv6);
+        info.push.apply(info, addIndent(server.ipv6));
       }
     }
     return (
-        <a itle={info.join('\n')} href="javascript:;" draggable="false"
+        <a title={info.join('\n')} draggable="false"
           className={'w-online-menu w-online' + (server ? '' : ' w-offline')} onClick={this.showServerInfo}>
           <span className="glyphicon glyphicon-stats"></span>{server ? 'Online' : 'Offline'}
           <Dialog ref="confirmReload" wstyle="w-confirm-reload-dialog">

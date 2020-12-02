@@ -8,7 +8,7 @@ var BtnGroup = require('./btn-group');
 var JSONViewer = require('./json-viewer');
 var Textarea = require('./textarea');
 
-var BTNS = [{name: 'Headers'}, {name: 'WebForms'}, {name: 'TextView'}, {name: 'JSONView'},
+var BTNS = [{name: 'Headers'}, {name: 'WebForms'}, {name: 'TextView', display: 'Body'}, {name: 'JSONView'},
   {name: 'HexView'}, {name: 'Cookies'}, {name: 'Raw'}];
 
 var ReqDetail = React.createClass({
@@ -67,6 +67,9 @@ var ReqDetail = React.createClass({
       query = util.parseQueryString(index == -1 ? '' : realUrl.substring(index + 1), null, null, decodeURIComponent);
       if (util.isUrlEncoded(req)) {
         form = util.parseQueryString(util.getBody(req, true), null, null, decodeURIComponent);
+        if (!window.___hasFormData) {
+          form = null;
+        }
       }
       headersStr = util.objectToString(headers, req.rawHeaderNames);
       headersStr = [req.method, req.method == 'CONNECT' ? headers.host : util.getPath(realUrl), 'HTTP/' + (req.httpVersion || '1.1')].join(' ')
@@ -90,7 +93,7 @@ var ReqDetail = React.createClass({
       <div className={'fill orient-vertical-box w-detail-content w-detail-request' + (util.getBoolean(this.props.hide) ? ' hide' : '')}>
         <BtnGroup onClick={this.onClickBtn} btns={BTNS} />
         {state.initedHeaders ? <div className={'fill w-detail-request-headers' + (name == BTNS[0].name ? '' : ' hide')}><Properties modal={rawHeaders || headers} enableViewSource="1" /></div> : ''}
-        {state.initedWebForms ? <Divider vertical="true" className={'w-detail-request-webforms' + (name == BTNS[1].name ? '' : ' hide')}>
+        {state.initedWebForms ? <Divider vertical="true" hideRight={!form} className={'w-detail-request-webforms' + (name == BTNS[1].name ? '' : ' hide')}>
           <div className="fill orient-vertical-box">
             <div className="w-detail-webforms-title">
               Query

@@ -9,7 +9,7 @@ require('should-http');
 var fs = require('fs');
 var fse = require('fs-extra2');
 var startWhistle = require('../index');
-var socks = require('socksv5');
+var socks = require('sockx');
 var util = require('./util.test');
 var config = require('./config.test');
 var events = require('./events');
@@ -108,6 +108,10 @@ var proxy = startWhistle({
 proxy.on('tunnelRequest', util.noop);
 proxy.on('wsRequest', util.noop);
 proxy.on('_request', util.noop);
+proxy.setUIHost('_');
+proxy.setUIHost();
+proxy.setPluginUIHost('test', '_');
+proxy.setPluginUIHost('whistle.test', '');
 var socksServer = socks.createServer(function(info, accept, deny) {
   var socket, client;
   if (info.dstPort === 443) {

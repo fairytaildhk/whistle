@@ -1,4 +1,7 @@
 var http = require('http');
+var gzip = require('zlib').gzip;
+var tls = require('tls');
+var Buffer = require('safe-buffer').Buffer;
 var config = require('../../../lib/config');
 var util = require('../../../lib/util');
 var zlib = require('../../../lib/util/zlib');
@@ -8,6 +11,8 @@ var hparser = require('hparser');
 
 var formatHeaders = hparser.formatHeaders;
 var getRawHeaders = hparser.getRawHeaders;
+var getRawHeaderNames = hparser.getRawHeaderNames;
+var BODY_SEP = Buffer.from('\r\n\r\n');
 var STATUS_CODE_RE = /^\S+\s+(\d+)/i;
 var MAX_LENGTH = 1024 * 512;
 var PROXY_OPTS = {
@@ -30,16 +35,18 @@ function parseHeaders(headers, rawHeaderNames) {
 
 function isWebSocket(options) {
   var p = options.protocol;
-  return p === 'ws:' || p === 'wss:';
+  return p === 'ws:' || p === 'wss:' || options.method === 'UPGRADE';
 }
 
 var crypto = require('crypto');
+var CONNECT_PROTOS = 'connect:,socket:,tunnel:,conn:,tls:,tcp:'.split(',');
+var TLS_PROTOS = 'https:,wss:,tls:'.split(',');
 function isConnect(options) {
   if (options.method === 'CONNECT') {
     return true;
   }
   var p = options.protocol;
-  return p === 'connect:' || p === 'socket:' || p === 'tunnel:' || p === 'conn:';
+  return CONNECT_PROTOS.indexOf(p) !== -1;
 }
 
 function drain(socket) {
@@ -55,18 +62,23 @@ function handleConnect(options, cb) {
     proxyHost: '127.0.0.1',
     proxyPort: config.port,
     headers: options.headers
-  }, function(socket, res, err) {
-    drain(socket);
-    var data = util.toBuffer(options.body, getCharset(options.headers));
-    if (data && data.length) {
-      socket.write(data);
+  }, function(socket, _, err) {
+    if (!err) {
+      if (TLS_PROTOS.indexOf(options.protocol) !== -1) {
+        socket = tls.connect({
+          rejectUnauthorized: config.rejectUnauthorized,
+          socket: socket,
+          servername: options.hostname
+        });
+      }
+      drain(socket);
+      var data = options.body;
+      if (data && data.length) {
+        socket.write(data);
+        options.body = data = null;
+      }
     }
-    if (cb) {
-      cb(err);
-      util.onSocketEnd(socket, function(err) {
-        cb(err || new Error('Closed'));
-      });
-    }
+    cb && cb(err);
   }).on('error', cb || util.noop);
 }
 
@@ -89,18 +101,20 @@ function handleWebSocket(options, cb) {
     } else {
       socket.write(getReqRaw(options));
       var handleResponse = function(resData) {
-        resData = resData + '';
-        var index = resData.indexOf('\r\n\r\n');
+        var index = util.indexOfList(resData, BODY_SEP);
+        var body = '';
         if (index !== -1) {
           socket.removeListener('data', handleResponse);
-          socket.headers = parseHeaders(resData.slice(0, index));
+          socket.headers = parseHeaders(resData.slice(0, index) + '');
+          body = resData.slice(index + 4);
           var sender = getSender(socket);
-          var data = util.toBuffer(options.body, getCharset(socket.headers) || getCharset(options.headers));
+          var data = options.body;
           if (data && data.length) {
             sender.send(data, {
               mask: true,
               binary: binary
             }, util.noop);
+            options.body = data = null;
           }
         }
         if (cb) {
@@ -108,11 +122,17 @@ function handleWebSocket(options, cb) {
           if (STATUS_CODE_RE.test(resData)) {
             statusCode = parseInt(RegExp.$1, 10);
           }
-          cb(null, {
+          if (statusCode !== 101) {
+            socket.destroy();
+          }
+          var result = {
             statusCode: statusCode,
-            headers: socket.headers || {},
-            body: ''
-          });
+            headers: socket.headers || {}
+          };
+          if (body) {
+            result.base64 = body.toString('base64');
+          }
+          cb(null, result);
         }
       };
       socket.on('data', handleResponse);
@@ -134,7 +154,7 @@ function handleHttp(options, cb) {
   options.hostname = null;
   options.host = '127.0.0.1';
   options.port = config.port;
-  http.request(options, function(res) {
+  var client = http.request(options, function(res) {
     if (cb) {
       res.on('error', cb);
       var buffer;
@@ -148,17 +168,32 @@ function handleHttp(options, cb) {
       });
       res.on('end', function() {
         zlib.unzip(res.headers['content-encoding'], buffer, function(err, body) {
-          cb(null, {
+          var headers = res.headers;
+          if (typeof headers.trailer === 'string' && headers.trailer.indexOf(',') !== -1) {
+            headers.trailer = headers.trailer.split(',');
+          }
+          var result = {
             statusCode: res.statusCode,
-            headers: res.headers,
-            body: err ? err.stack : util.decodeBuffer(body)
-          });
+            headers: headers,
+            trailers: res.trailers,
+            rawHeaderNames: getRawHeaderNames(res.rawHeaders),
+            rawTrailerNames: getRawHeaderNames(res.rawTrailers)
+          };
+          if (err) {
+            result.body = err.stack;
+          } else if (body) {
+            result.base64 = body.toString('base64');
+          }
+          cb(null, result);
         });
       });
     } else {
       drain(res);
     }
-  }).on('error', cb || util.noop).end(options.body);
+  });
+  client.on('error', cb || util.noop);
+  client.end(options.body);
+  options.body = null;
 }
 
 function getCharset(headers) {
@@ -177,10 +212,10 @@ module.exports = function(req, res) {
   if (!options.host) {
     return res.json({ec: 0});
   }
-  if (options.protocol) {
-    options.protocol = options.protocol.toLowerCase();
+  var protocol = options.protocol;
+  if (protocol) {
+    options.protocol = protocol = protocol.toLowerCase();
   }
-  properties.addHistory(req.body);
   var rawHeaderNames = {};
   var headers = parseHeaders(req.body.headers, rawHeaderNames);
   delete headers[config.WEBUI_HEAD];
@@ -196,6 +231,8 @@ module.exports = function(req, res) {
   var isConn = isConnect(options);
   var isWs = !isConn && (isWebSocket(options)
     || (/^\s*upgrade\s*$/i.test(headers.connection) && /^\s*websocket\s*$/i.test(headers.upgrade)));
+  var useH2 = req.body.useH2;
+  req.body.useH2 = false;
   if (isWs) {
     headers.connection = 'Upgrade';
     headers.upgrade = 'websocket';
@@ -204,58 +241,88 @@ module.exports = function(req, res) {
   } else {
     headers.connection = 'close';
     delete headers.upgrade;
+    if (!isConn && ((useH2 && protocol === 'https:') || protocol === 'h2:' || protocol === 'http2:')) {
+      req.body.useH2 = true;
+      options.protocol = protocol = 'https:';
+      headers[config.ALPN_PROTOCOL_HEADER] = 'h2';
+    }
   }
+  !req.body.noStore && properties.addHistory(req.body);
 
-  var base64 = req.body.base64;
-  var body = base64 || req.body.body;
-  if (body && (isWs || isConn || util.hasRequestBody(options))) {
-    body = util.toBuffer(body, base64 ? 'base64' : getCharset(headers));
-    options.body = body;
-    if ('content-length' in headers) {
-      if (isWs || isConn) {
-        delete headers['content-length'];
-      } else {
-        headers['content-length'] = body ? body.length : '0';
+  var getBody = function(cb) {
+    var base64 = req.body.base64;
+    var body = base64 || req.body.body;
+    if (isWs || isConn || util.hasRequestBody(options)) {
+      body = body && util.toBuffer(body, base64 ? 'base64' : getCharset(headers));
+      options.body = body;
+      if (!isWs && !isConn && body && req.body.isGzip) {
+        gzip(body, function(err, gzipData) {
+          if (err) {
+            return cb(err);
+          }
+          headers['content-encoding'] = 'gzip';
+          if ('content-length' in headers) {
+            headers['content-length'] = gzipData.length;
+          } else {
+            delete headers['content-length'];
+          }
+          options.body = gzipData;
+          cb();
+        });
+        return;
       }
+      if ('content-length' in headers) {
+        if (isWs || isConn) {
+          delete headers['content-length'];
+        } else {
+          headers['content-length'] = body ? body.length : '0';
+        }
+      }
+    } else {
+      delete headers['content-length'];
     }
-  } else {
-    delete headers['content-length'];
-  }
-  delete headers['content-encoding'];
-  options.headers = formatHeaders(headers, rawHeaderNames);
-  var done;
-  var needResponse = req.query.needResponse || req.body.needResponse;
-  var handleResponse = needResponse ? function(err, data) {
-    if (done) {
-      return;
-    }
-    done = true;
+    delete headers['content-encoding'];
+    cb();
+  };
+  getBody(function(err) {
+    options.headers = formatHeaders(headers, rawHeaderNames);
+    var done;
+    var needResponse = req.query.needResponse || req.body.needResponse;
+    var handleResponse = needResponse ? function(err, data) {
+      if (done) {
+        return;
+      }
+      done = true;
+      if (err) {
+        res.json({ec: 0, res: {
+          statusCode:  err.statusCode ? parseInt(err.statusCode, 10) : 502,
+          headers: '',
+          body: err.stack
+        }});
+        return;
+      }
+      res.json({ec: 0, em: 'success', res: data || ''});
+    } : null;
     if (err) {
-      res.json({ec: 0, res: {
-        statusCode:  err.statusCode ? parseInt(err.statusCode, 10) : 502,
-        headers: '',
-        body: err.stack
-      }});
-      return;
+      return handleResponse && handleResponse(err);
     }
-    res.json({ec: 0, em: 'success', res: data || ''});
-  } : null;
-  if (isWs) {
-    options.method = 'GET';
-    if (handleResponse) {
-      return handleWebSocket(options, handleResponse);
+    if (isWs) {
+      options.method = 'GET';
+      if (handleResponse) {
+        return handleWebSocket(options, handleResponse);
+      }
+      handleWebSocket(options);
+    } else if (isConn) {
+      if (handleResponse) {
+        return handleConnect(options, handleResponse);
+      }
+      handleConnect(options);
+    } else  {
+      if (handleResponse) {
+        return handleHttp(options, handleResponse);
+      }
+      handleHttp(options);
     }
-    handleWebSocket(options);
-  } else if (isConn) {
-    if (handleResponse) {
-      return handleConnect(options, handleResponse);
-    }
-    handleConnect(options);
-  } else  {
-    if (handleResponse) {
-      return handleHttp(options, handleResponse);
-    }
-    handleHttp(options);
-  }
-  res.json({ec: 0, em: 'success'});
+    res.json({ec: 0, em: 'success'});
+  });
 };

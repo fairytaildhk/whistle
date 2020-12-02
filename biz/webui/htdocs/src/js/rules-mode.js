@@ -3,17 +3,45 @@ var events = require('./events');
 var protocols = require('./protocols');
 var forwardRules = protocols.getForwardRules();
 var pluginRules = protocols.getPluginRules();
+var DOT_PATTERN_RE = /^\.[\w-]+(?:[?$]|$)/;
+var DOT_DOMAIN_RE = /^\.[^./?]+\.[^/?]/;
+var IPV4_PORT_RE = /^(?:::(?:ffff:)?)?(?:(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)(?:\:(\d+))?$/;
+var FULL_IPV6_RE = /^[\da-f]{1,4}(?::[\da-f]{1,4}){7}$/;
+var SHORT_IPV6_RE = /^[\da-f]{1,4}(?::[\da-f]{1,4}){0,6}$/;
+var IP_WITH_PORT_RE = /^\[([:\da-f.]+)\](?::(\d+))?$/i;
 
 events.on('updatePlugins', function() {
   forwardRules = protocols.getForwardRules();
   pluginRules = protocols.getPluginRules();
 });
 
+function notPort(port) {
+  return port && (port == 0 || port > 65535);
+}
 
 CodeMirror.defineMode('rules', function() {
   function isIP(str) {
-    return /^(?:(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)(?:\:\d+)?$/.test(str)
-      || /^[:\da-f]*:[\da-f]*:[\da-f]+$/i.test(str) || /^\[[:\da-f]*:[\da-f]*:[\da-f]+\](?::\d+)?$/i.test(str);
+    var port;
+    if (IP_WITH_PORT_RE.test(str)) {
+      str = RegExp.$1;
+      port = RegExp.$2;
+      if (notPort(port)) {
+        return false;
+      }
+    }
+    if (IPV4_PORT_RE.test(str)) {
+      return !port && notPort(RegExp.$1) ? false : true;
+    }
+    var index = str.indexOf('::');
+    if (index !== -1) {
+      if (str === '::' || str.indexOf('::', index + 1) !== -1) {
+        return false;
+      }
+      str = str.split('::', 2);
+      str = str[0] && str[1] ? str.join(':') : (str[0] || str[1]);
+      return SHORT_IPV6_RE.test(str);
+    }
+    return FULL_IPV6_RE.test(str);
   }
   function isHost(str) {
     return /^x?hosts?:\/\//.test(str);
@@ -31,7 +59,7 @@ CodeMirror.defineMode('rules', function() {
   }
 
   function isRes(str) {
-    return /^(?:resScript|responseFor|resCookies|resHeaders|statusCode|status|replaceStatus|redirect|resDelay|resSpeed|resCors|resType|resCharset|cache|attachment|download|resBody|resPrepend|resAppend|css(?:Append|Prepend|Body)?|html(?:Append|Prepend|Body)?|js(?:Append|Prepend|Body)?|resReplace|resMerge|resWrite|resWriteRaw):\/\//.test(str);
+    return /^(?:resScript|resRules|responseFor|resCookies|resHeaders|trailers|replaceStatus|redirect|resDelay|resSpeed|resCors|resType|resCharset|cache|attachment|download|resBody|resPrepend|resAppend|css(?:Append|Prepend|Body)?|html(?:Append|Prepend|Body)?|js(?:Append|Prepend|Body)?|resReplace|resMerge|resWrite|resWriteRaw):\/\//.test(str);
   }
 
   function isUrl(str) {
@@ -44,7 +72,7 @@ CodeMirror.defineMode('rules', function() {
 
   function notExistRule(str) {
     str = str.substring(0, str.indexOf(':'));
-    return forwardRules.indexOf(str) == -1;
+    return forwardRules.indexOf(str) == -1 && str !== 'status';
   }
 
   function notExistPlugin(str) {
@@ -64,8 +92,16 @@ CodeMirror.defineMode('rules', function() {
     return /^log:\/\//.test(str);
   }
 
+  function isStyle(str) {
+    return /^style:\/\//.test(str);
+  }
+
   function isFilter(str) {
     return /^(?:excludeFilter|filter):\/\//.test(str);
+  }
+
+  function isLineProps(str) {
+    return /^lineProps:\/\//.test(str);
   }
 
   function isPlugin(str) {
@@ -73,11 +109,15 @@ CodeMirror.defineMode('rules', function() {
   }
 
   function isRulesFile(str) {
-    return /^(?:rules?(?:File|Script)|reqScript):\/\//.test(str);
+    return /^(?:rules?(?:File|Script)|reqScript|reqRules):\/\//.test(str);
   }
 
   function isDisable(str) {
     return /^disable:\/\//.test(str);
+  }
+
+  function isCipher(str) {
+    return /^cipher:\/\//.test(str);
   }
 
   function isIgnore(str) {
@@ -97,7 +137,7 @@ CodeMirror.defineMode('rules', function() {
   }
 
   function isProxy(str) {
-    return /^x?(?:proxy|https?-proxy|http2https-proxy|https2http-proxy|internal-proxy):\/\//.test(str);
+    return /^x?(?:proxy|https?-proxy|http2https-proxy|https2http-proxy|internal-proxy|internal-https?-proxy):\/\//.test(str);
   }
 
   function isSocks(str) {
@@ -117,14 +157,15 @@ CodeMirror.defineMode('rules', function() {
   }
 
   function isWildcard(str) {
-    if (!/^(?:\$?(?:https?:|wss?:|tunnel:)?\/\/)?([^/]+)/.test(str)) {
+    if (!/^(?:\$?(?:https?:|wss?:|tunnel:)?\/\/)?([^/?]+)/.test(str)) {
       return false;
     }
-    return RegExp.$1.indexOf('*') !== -1 || RegExp.$1.indexOf('~') !== -1;
+    var domain = RegExp.$1;
+    return domain.indexOf('*') !== -1 || domain.indexOf('~') !== -1 || DOT_DOMAIN_RE.test(domain);
   }
 
   function isRegUrl(url) {
-    return /^\^/.test(url);
+    return /^\^/.test(url) || DOT_PATTERN_RE.test(url);
   }
 
   return {
@@ -144,7 +185,7 @@ CodeMirror.defineMode('rules', function() {
       var not = ch === '!';
       var str = not ? stream.next() : ch;
       var type = '';
-      var pre;
+      var pre, isHttpUrl;
       stream.eatWhile(function(ch) {
         if (/\s/.test(ch) || ch == '#') {
           return false;
@@ -171,18 +212,24 @@ CodeMirror.defineMode('rules', function() {
             type = 'meta js-params js-type';
           } else if (isLog(str)) {
             type = 'atom js-log js-type';
+          } else if (isStyle(str)) {
+            type = 'atom js-style js-type';
           } else if (isPlugin(str)) {
             type = 'variable-2 js-plugin js-type';
           } else if (isHeaderReplace(str)) {
             type = 'variable-2 js-headerReplace js-type';
           } else if (isFilter(str)) {
             type = 'negative js-filter js-type';
+          } else if (isLineProps(str)) {
+            type = 'negative js-line-props js-type';
           } else if (isIgnore(str)) {
             type = 'negative js-ignore js-type';
           } else if (isEnable(str)) {
             type = 'atom js-enable js-type';
           } else if (isDisable(str)) {
             type = 'negative js-disable js-type';
+          } else if (isCipher(str)) {
+            type = 'atom js-cipher js-type';
           } else if (isDelete(str)) {
             type = 'negative js-delete js-type';
           } else if (isProxy(str)) {
@@ -194,6 +241,7 @@ CodeMirror.defineMode('rules', function() {
           } else if (isRulesFile(str)) {
             type = 'variable-2 js-rulesFile js-type';
           } else if (isUrl(str)) {
+            isHttpUrl = true;
             type = 'string-2 js-url js-type' + (str[0] === 'h' ? ' js-http-url' : '');
           } else if (isWildcard(str)) {
             type = 'attribute js-attribute';
@@ -219,6 +267,8 @@ CodeMirror.defineMode('rules', function() {
         } else if (isLocalPath(str)) {
           type = 'builtin js-rule js-type';
         }
+      } else if (isHttpUrl && isWildcard(str)) {
+        return 'attribute js-attribute';
       }
       return not ? type + ' error-rule' : (type || 'js-http-url');
     }

@@ -1,7 +1,9 @@
+var gzip = require('zlib').gzip;
 var util = require('../../../lib/util');
 var config = require('../../../lib/config');
 var properties = require('../../../lib/rules/util').properties;
 
+var PID = process.pid;
 var MAX_OBJECT_SIZE = 1024 * 1024 * 6;
 var index = 0;
 
@@ -12,19 +14,30 @@ exports.getClientId = function() {
   return Date.now() + '-' + index++;
 };
 
-exports.getServerInfo = function getServerInfo(req) {
+exports.getServerInfo = function(req) {
   var info = {
+    pid: PID,
     version: config.version,
+    cmdName: config.cmdName,
+    hideLeftMenu: config.hideLeftMenu,
     networkMode: config.networkMode,
+    pluginsMode: config.pluginsMode,
+    ndr: config.notAllowedDisableRules,
+    ndp: config.notAllowedDisablePlugins,
+    rulesMode: config.rulesMode,
     strictMode: config.strict,
     multiEnv: config.multiEnv,
     baseDir: config.baseDirHash,
     username: config.username,
     nodeVersion: process.version,
-    latestVersion: properties.get('latestVersion'),
+    latestVersion: properties.getLatestVersion('latestVersion'),
     host: util.hostname(),
     isWin: util.isWin,
     port: config.port,
+    realPort: config.realPort,
+    socksPort: config.socksPort,
+    httpPort: config.httpPort,
+    httpsPort: config.httpsPort,
     ipv4: [],
     ipv6: [],
     mac: req.ip + (config.storage ? '\n' + config.storage : '')
@@ -106,3 +119,26 @@ function formatDate() {
 exports.formatDate = formatDate;
 
 exports.getClientIp = util.getClientIp;
+
+exports.sendGzip = function(req, res, data) {
+  if (req.clientIp === '127.0.0.1' || !util.canGzip(req)) {
+    return res.json(data);
+  }
+  gzip(JSON.stringify(data), function(err, result) {
+    if (err) {
+      try {
+        res.json(data);
+      } catch (e) {
+        res.status(500).send(config.debugMode ?
+          '<pre>' + util.getErrorStack(err) + '</pre>' : 'Internal Server Error');
+      }
+      return;
+    }
+    res.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Content-Encoding': 'gzip',
+      'Content-Length': result.length
+    });
+    res.end(result);
+  });
+};

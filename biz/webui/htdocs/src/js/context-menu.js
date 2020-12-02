@@ -3,6 +3,7 @@ require('../css/context-menu.css');
 var $ = require('jquery');
 var React = require('react');
 var ReactDOM = require('react-dom');
+var util = require('./util');
 
 var ContextMenu = React.createClass({
   getInitialState: function() {
@@ -45,7 +46,7 @@ var ContextMenu = React.createClass({
     }
     this.hide();
     if (this.props.onClick) {
-      this.props.onClick(target.attr('data-menu-action'), e);
+      this.props.onClick(target.attr('data-menu-action'), e, target.attr('data-parent-action'), target.attr('data-name'));
     }
   },
   getDialogElement: function() {
@@ -67,16 +68,18 @@ var ContextMenu = React.createClass({
                 + (item.copyText ? ' w-copy-text' : '')}
                 data-clipboard-text={item.copyText}
                 style={{display: item.hide ? 'none' : undefined}}
+                onClick={item.onClick}
               >
                 <p className="w-ctx-item-tt">{item.name}</p>
                 {subList ? <span className="glyphicon glyphicon-play"></span> : undefined}
                 {subList ? <div className="w-ctx-menu-gap"></div> : undefined}
                 {
                   subList ? (
-                    <ul className="w-ctx-menu-list">
-                      {subList.map(function(subItem) {
+                    <ul className="w-ctx-menu-list" style={item.top > 0 ? { top: -item.top * 30 - 1, maxHeight: item.maxHeight } : undefined}>
+                      {subList.map(function(subItem, i) {
                         return (
-                          <li data-menu-action={subItem.action || subItem.name} key={subItem.name}
+                          <li title={subItem.title} data-parent-action={item.action} data-name={subItem.name}
+                            data-menu-action={subItem.action || subItem.name} key={i} onClick={subItem.onClick}
                             className={'w-ctx-menu-item ' + (subItem.sep ? 'w-ctx-item-sep' : '')
                             + (subItem.disabled ? ' w-ctx-item-disabled' : '')
                             + (subItem.copyText ? ' w-copy-text' : '')}
@@ -108,5 +111,8 @@ var ContextMenu = React.createClass({
     return null;
   }
 });
+
+ContextMenu.util = util;
+ContextMenu.$ = $;
 
 module.exports = ContextMenu;

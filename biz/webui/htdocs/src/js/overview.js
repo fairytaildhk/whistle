@@ -2,14 +2,17 @@ require('./base-css.js');
 require('../css/overview.css');
 var React = require('react');
 var ReactDOM = require('react-dom');
+var columns = require('./columns');
 var events = require('./events');
 var util = require('./util');
 var storage = require('./storage');
 var Properties = require('./properties');
+var dataCenter = require('./data-center');
+var getHelpUrl = require('./protocols').getHelpUrl;
 
-var OVERVIEW = ['Url', 'Real Url', 'Method', 'Http Version', 'Status Code', 'Status Message', 'Client IP', 'Server IP', 'Client Port', 'Server Port', 'Request Length', 'Content Length'
+var OVERVIEW = ['Url', 'Real Url', 'Method', 'Http Version', 'Status Code', 'Status Message', 'Client IP', 'Client Port', 'Server IP', 'Server Port', 'Request Length', 'Content Length'
                       , 'Content Encoding', 'Start Date', 'DNS Lookup', 'Request Sent', 'Response Headers', 'Content Download'];
-var OVERVIEW_PROPS = ['url', 'realUrl', 'req.method', 'req.httpVersion', 'res.statusCode', 'res.statusMessage', 'req.ip', 'res.ip', 'req.port', 'res.port', 'req.size', 'res.size', 'contentEncoding'];
+var OVERVIEW_PROPS = ['url', 'realUrl', 'req.method', 'req.httpVersion', 'res.statusCode', 'res.statusMessage', 'req.ip', 'req.port', 'res.ip', 'res.port', 'req.size', 'res.size', 'contentEncoding'];
 /**
  * statusCode://, redirect://[statusCode:]url, [req, res]speed://,
  * [req, res]delay://, method://, [req, res][content]Type://自动lookup,
@@ -18,8 +21,11 @@ var OVERVIEW_PROPS = ['url', 'realUrl', 'req.method', 'req.httpVersion', 'res.st
 var PROTOCOLS = require('./protocols').PROTOCOLS;
 var DEFAULT_OVERVIEW_MODAL = {};
 var DEFAULT_RULES_MODAL = {};
-var IPV6_RE = /^host:\/\/[:\da-f]*:[\da-f]*:[\da-f]+$/i;
 var PROXY_PROTOCOLS = ['socks', 'http-proxy', 'https-proxy'];
+
+function getAtRule(rule) {
+  return rule.rawPattern + ' @' + rule.matcher.substring(4);
+}
 
 function getRuleStr(rule) {
   if (!rule) {
@@ -27,12 +33,14 @@ function getRuleStr(rule) {
   }
   var matcher = rule.matcher;
   if (rule.port) {
-    if (IPV6_RE.test(matcher)) {
-      matcher = '[' + matcher + ']';
+    var protoIndex = matcher.indexOf(':') + 3;
+    var proto = matcher.substring(0, protoIndex);
+    if (matcher.indexOf(':', protoIndex) !== -1) {
+      matcher = proto + '[' + matcher.substring(protoIndex) + ']';
     }
     matcher = matcher + ':' + rule.port;
   }
-  return rule.rawPattern + ' ' +  matcher;
+  return rule.rawPattern + ' ' +  matcher + (rule.filter ? ' ' + rule.filter : '');
 }
 
 OVERVIEW.forEach(function(name) {
@@ -44,6 +52,10 @@ PROTOCOLS.forEach(function(name) {
   }
   DEFAULT_RULES_MODAL[name] = '';
 });
+
+function formatSize(value) {
+  return value >= 1024 ? value + '(' + Number(value / 1024).toFixed(2) + 'k)' : value;
+}
 
 var Overview = React.createClass({
   getInitialState: function() {
@@ -71,6 +83,14 @@ var Overview = React.createClass({
       showOnlyMatchRules: showOnlyMatchRules
     });
   },
+  onHelp: function(e) {
+    var name = e.target.getAttribute('data-name');
+    var helpUrl = getHelpUrl(name);
+    if (!helpUrl) {
+      return;
+    }
+    window.open(name === 'rule' ? helpUrl + 'rule/' : helpUrl);
+  },
   render: function() {
     var overviewModal = DEFAULT_OVERVIEW_MODAL;
     var rulesModal = DEFAULT_RULES_MODAL;
@@ -87,9 +107,14 @@ var Overview = React.createClass({
           if (value && prop === 'res.ip') {
             value = util.getServerIp(modal);
           }
-          if (value) {
-            if ((prop == 'req.size' || prop == 'res.size') && value >= 1024) {
-              value += '(' + Number(value / 1024).toFixed(2) + 'k)';
+          if (value != null) {
+            if (prop == 'req.size' || prop == 'res.size') {
+              var size = value;
+              value = formatSize(size);
+              var unzipSize = value ? util.getProperty(modal, prop.substring(0, 4) + 'unzipSize') : -1;
+              if (unzipSize >= 0 && unzipSize != size) {
+                value += ' / ' + formatSize(unzipSize) + ' = ' + Number(size * 100 / unzipSize).toFixed(2) + '%';
+              }
             } else if (prop == 'realUrl') {
               if (value == modal.url) {
                 value = '';
@@ -109,7 +134,7 @@ var Overview = React.createClass({
           var time;
           switch(name) {
           case OVERVIEW[lastIndex - 4]:
-            time = new Date(modal.startTime).toLocaleString();
+            time = util.toLocaleString(new Date(modal.startTime));
             break;
           case OVERVIEW[lastIndex - 3]:
             if (modal.dnsTime) {
@@ -119,6 +144,13 @@ var Overview = React.createClass({
           case OVERVIEW[lastIndex - 2]:
             if (modal.requestTime) {
               time = modal.requestTime - modal.startTime + 'ms';
+              var protocol = modal.protocol;
+              if (typeof protocol === 'string' && protocol.indexOf('>') !== -1) {
+                var diffTime =  modal.httpsTime - modal.startTime;
+                if (diffTime > 0) {
+                  time += ' - ' + diffTime + 'ms(' + protocol + ') = ' + (modal.requestTime - modal.httpsTime) + 'ms';
+                }
+              }
             }
             break;
           case OVERVIEW[lastIndex - 1]:
@@ -135,10 +167,38 @@ var Overview = React.createClass({
           overviewModal[name] = time;
         }
       });
+      var custom1 = columns.getColumn('custom1');
+      var custom2 = columns.getColumn('custom2');
+      if (custom1.selected) {
+        overviewModal[(dataCenter.custom1 || 'Custom1') + ' '] = modal.custom1;
+      }
+
+      if (custom2.selected) {
+        overviewModal[(dataCenter.custom2 || 'Custom2') + '  '] = modal.custom2;
+      }
+
       var rules = modal.rules;
       var titleModal = {};
       if (rules) {
         rulesModal = {};
+        var atRule = rules.G;
+        var clientCert = rules.clientCert;
+        var atCtn;
+        var atTitle;
+        if (atRule) {
+          atCtn = [getAtRule(atRule)];
+          atTitle = [atRule.raw];
+        }
+        if (clientCert) {
+          atCtn = atCtn || [];
+          atTitle = atTitle || [];
+          atCtn.push(getAtRule(clientCert));
+          atTitle.push(clientCert.raw);
+        }
+        if (atCtn) {
+          rulesModal['@'] = atCtn.join('\n');
+          titleModal['@'] = atTitle.join('\n');
+        }
         PROTOCOLS.forEach(function(name) {
           if (PROXY_PROTOCOLS.indexOf(name) !== -1 || /^x/.test(name)) {
             return;
@@ -152,7 +212,16 @@ var Overview = React.createClass({
             key = 'urlReplace';
           }
           var rule = rules[key];
-          if (rule && rule.list) {
+          if (name === 'plugin' && rules._pluginRule) {
+            var ruleList = [ rules._pluginRule.rawPattern + ' ' + rules._pluginRule.matcher ];
+            var titleList = [rules._pluginRule.raw];
+            rule && rule.list && rule.list.forEach(function(item) {
+              ruleList.push(item.rawPattern + ' ' + item.matcher);
+              titleList.push(item.raw);
+            });
+            rulesModal[name] = ruleList.join('\n');
+            titleModal[name] = titleList.join('\n');
+          } else if (rule && rule.list) {
             rulesModal[name] = rule.list.map(function(rule) {
               return rule.rawPattern + ' ' + rule.matcher;
             }).join('\n');
@@ -179,7 +248,7 @@ var Overview = React.createClass({
           <a href="https://avwo.github.io/whistle/rules/" target="_blank"><span className="glyphicon glyphicon-question-sign"></span></a>All Rules:
           <label><input checked={showOnlyMatchRules} onChange={this.showOnlyMatchRules} type="checkbox" />Only show matching rules</label>
         </p>
-        <Properties className={showOnlyMatchRules ? 'w-hide-no-value' : undefined} modal={rulesModal} title={titleModal} />
+        <Properties onHelp={this.onHelp} className={showOnlyMatchRules ? 'w-hide-no-value' : undefined} modal={rulesModal} title={titleModal} />
       </div>
     );
   }

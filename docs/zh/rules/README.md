@@ -6,6 +6,9 @@
 #### @ 功能
 1. [**@** (用于功能扩展及引入远程规则)](@.html)
 
+#### 设置UI样式
+1. [**style** (设置抓包列表样式)](style.html)
+
 #### 设置hosts
 1. [**host** (设置host)](host.html)
 
@@ -53,8 +56,8 @@
 5. [**reqMerge** (修改请求参数或请求内容)](reqMerge.html)
 
 #### 修改响应状态码
-1. [**statusCode** (直接响应)](statusCode.html)
-2. [**replaceStatus** (替换后台的响应状态码)](replaceStatus.html)
+1. [**replaceStatus** (替换后台的响应状态码)](replaceStatus.html)
+2. [**statusCode** (直接响应)](rule/statusCode.html)
 
 #### 修改响应头
 1. [**resHeaders** (修改响应头)](resHeaders.html)
@@ -76,6 +79,7 @@
     * [**xtpl** (替换本地目标文件，如果本地文件找不到会继续请求线上，可用于模拟jsonp请求)](rule/xtpl.html)
     * [**rawfile** (替换本地http响应内容格式的文件)](rule/rawfile.html)
     * [**xrawfile** (替换本地http响应内容格式的文件，如果本地文件找不到会继续请求线上)](rule/xrawfile.html)
+    * [**statusCode** (直接响应)](rule/statusCode.html)
     * [**自定义**](rule/custom.html)
 2. [**resMerge** (修改响应参数)](resMerge.html)
 3. [**resPrepend** (往响应内容前面添加数据)](resPrepend.html)
@@ -92,8 +96,11 @@
 14. [**cssAppend** (往响应为html或css的内容后面追加数据)](cssAppend.md)
 15. [**jsAppend** (往响应为html或js的内容后面追加数据)](jsAppend.md)
 
+#### 修改 trailers
+1. [**trailers** (302重定向)](trailers.html)
+
 #### 过滤配置
-1. [**filter(excludeFilter|includeFilter)** (过滤规则，隐藏请求等)](filter.html)
+1. [**filter (excludeFilter|includeFilter)** (过滤规则，隐藏请求等)](filter.html)
 2. [**ignore** (忽略规则)](ignore.html)
 
 #### 启用或禁用一些配置
@@ -109,11 +116,15 @@
 推荐通过插件获取，具体参考：[插件开发](../plugins.html)
 
 #### 动态设置规则
-1. [**reqScript** (批量设置请求规则或通过脚本动态获取规则)](reqScript.md)
-2. [**resScript** (批量设置响应规则或通过脚本动态获取规则)](resScript.md)
+1. [**reqScript (reqRules)** (批量设置请求规则或通过脚本动态获取规则)](reqScript.md)
+2. [**resScript (resRules)** (批量设置响应规则或通过脚本动态获取规则)](resScript.md)
 
 #### 开发调试工具
 1. [**plugin** (配置匹配的插件)](plugin.html)
 3. [**weinre** (设置weinre，调试手机页面)](weinre.html)
 4. [**log** (打印网页js错误或者调试信息)](log.html)
 5. [**pipe** 把数据流转到插件](rules/pipe.html)
+
+
+#### 修改加密算法
+1. [**cipher** (设置兜底加密算法)](cipher.html)

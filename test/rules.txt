@@ -22,9 +22,13 @@ weinre1.test2.whistlejs.com weinre://xxx file://(hello) log://test resType://js 
 filter.com enable://capture
 filter.com/index.html file://({"ec":0}) excludeFilter://m:post excludeFilter://m:/delete/
 filter.com/index.html file://({"ec":1}) includeFilter://m:delete includeFilter://b:test
-filter.com/index.html file://({"ec":2}) includeFilter://b:test excludeFilter://h:x-test=/\d+/
+filter.com/index.html file://({"ec":2}) includeFilter://b:555 excludeFilter://reqH:x-test=/\d+/
 filter.com/index.html file://({"ec":3}) excludeFilter://h:x-test=/\d+/
 filter.com/index.html file://({"ec":4}) 
+
+filter2.com/test.html file://({"ec":123}) includeFilter:///abc/
+filter2.com/test.html file://({"ec":321}) excludeFilter:///cba/
+filter2.com/test.html file://({"ec":333})
 
 1.tps.whistlejs.com file://() enable://capture resAppend://`{${url.query.name}}`
 2.tps.whistlejs.com resScript://{tps.rules} rawfile://{rawFile2.js} enable://capture
@@ -49,3 +53,16 @@ file://(0)
 range1.whistlejs.com file://{range.txt}
 range2.whistlejs.com whistle.test2://
 headerreplace.plugin.whistlejs.com headerReplace://req.host:headerreplace.=&/Plugin/i=test headerReplace://res.set-cookie:test=abc resHeaders://(set-cookie=test&set-cookie=test222)
+
+**/wildcard5/_____/** file://({"ec":"$2"})
+***.test.wildcard5.com file://({"ec":0}) resType://json enable://capture
+
+``` w1.json
+[list[10]]: `a\rb\nc`
+[list[20]]: 123
+[list[30]]: "123"
+[list[40].a]: "123"
+```
+.test.wildcard5.com resMerge://{w1.json}
+
+/testx.whistlejs.com/ enable://capture

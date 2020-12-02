@@ -1,7 +1,10 @@
 'use strict';
 
 exports.__esModule = true;
-exports['default'] = undefined;
+
+var _stringify = require('babel-runtime/core-js/json/stringify');
+
+var _stringify2 = _interopRequireDefault(_stringify);
 
 var _keys = require('babel-runtime/core-js/object/keys');
 
@@ -22,8 +25,6 @@ var _inherits3 = _interopRequireDefault(_inherits2);
 var _extends2 = require('babel-runtime/helpers/extends');
 
 var _extends3 = _interopRequireDefault(_extends2);
-
-var _class, _temp;
 
 var _react = require('react');
 
@@ -106,7 +107,7 @@ function getStateFromProps(props) {
   };
 }
 
-var JSONNestedNode = (_temp = _class = function (_React$Component) {
+var JSONNestedNode = function (_React$Component) {
   (0, _inherits3['default'])(JSONNestedNode, _React$Component);
 
   function JSONNestedNode(props) {
@@ -115,7 +116,9 @@ var JSONNestedNode = (_temp = _class = function (_React$Component) {
     var _this = (0, _possibleConstructorReturn3['default'])(this, _React$Component.call(this, props));
 
     _this.handleClick = function () {
-      return _this.setState({ expanded: !_this.state.expanded });
+      if (_this.props.expandable) {
+        _this.setState({ expanded: !_this.state.expanded });
+      }
     };
 
     _this.state = getStateFromProps(props);
@@ -182,14 +185,15 @@ var JSONNestedNode = (_temp = _class = function (_React$Component) {
       _react2['default'].createElement(
         'label',
         (0, _extends3['default'])({}, styling.apply(undefined, [['label', 'nestedNodeLabel']].concat(stylingArgs)), {
-          onClick: expandable && this.handleClick
+          onClick: this.handleClick,
+          'data-key-path': (0, _stringify2['default'])(keyPath)
         }),
         labelRenderer.apply(undefined, stylingArgs)
       ),
       _react2['default'].createElement(
         'span',
         (0, _extends3['default'])({}, styling.apply(undefined, ['nestedNodeItemString'].concat(stylingArgs)), {
-          onClick: expandable && this.handleClick
+          onClick: this.handleClick
         }),
         renderedItemString
       ),
@@ -202,7 +206,9 @@ var JSONNestedNode = (_temp = _class = function (_React$Component) {
   };
 
   return JSONNestedNode;
-}(_react2['default'].Component), _class.propTypes = {
+}(_react2['default'].Component);
+
+JSONNestedNode.propTypes = {
   getItemString: _propTypes2['default'].func.isRequired,
   nodeTypeIndicator: _propTypes2['default'].any,
   nodeType: _propTypes2['default'].string.isRequired,
@@ -218,10 +224,11 @@ var JSONNestedNode = (_temp = _class = function (_React$Component) {
   sortObjectKeys: _propTypes2['default'].oneOfType([_propTypes2['default'].func, _propTypes2['default'].bool]),
   isCircular: _propTypes2['default'].bool,
   expandable: _propTypes2['default'].bool
-}, _class.defaultProps = {
+};
+JSONNestedNode.defaultProps = {
   data: [],
   circularCache: [],
   level: 0,
   expandable: true
-}, _temp);
+};
 exports['default'] = JSONNestedNode;

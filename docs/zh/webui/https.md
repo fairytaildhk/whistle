@@ -1,12 +1,11 @@
 # Https
 
-> 建议使用 `Node v6` 或以上版本，否则会存在性能问题，及在Chrome或APP上抓包HTTPS请求会有问题。
+> 建议使用 `Node v12` 或以上版本。
 
-> **在iOS上安装根证书时，需要先关闭`HTTPS拦截`，否则将显示安装失败。**
 
-用来下载根证书、隐藏`connect`类型的请求、开启HTTPS拦截功能。
+下载根证书，开启捕获HTTPS请求：
 
-![Https](../img/https.gif)
+![Https](https://user-images.githubusercontent.com/11450939/83850712-e384cc80-a743-11ea-9cf4-c5c3f4cbf0c8.png)
 
 ## 安装根证书
 > 证书按下面步骤安装后，如果还出现安全提醒，这个主要原因是之前你访问过该页面，导致长连接已建立，可以等段时间再访问、或重新打开浏览器，或重启下whistle： `w2 restart`
@@ -23,6 +22,8 @@
 2. Mac: [Mac根证书怎么安装](http://zhidao.baidu.com/link?url=bQ8ZnDTxUIlqruQ56NYjBmwztWPlZtv9AIRazkoKeMsdpAq7mcwXOHQduRwmHV1M2hf143vqBxHzKb1tg0L03DJoj6XS109P8zBNF1E9uU_)
 
   Mac 安装证书后，需要手动信任证书，步骤如下：
+
+ ![选择系统钥匙串](https://user-images.githubusercontent.com/11450939/62097992-3b001380-b2bb-11e9-878b-f19b8f38d176.png)
 
   打开证书管理界面，找到带有 `whistle` 的字样的证书，如果有多个又不确定最新安装的是哪个，可以全部删除后重新安装
 

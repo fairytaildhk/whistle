@@ -1,7 +1,10 @@
 var util = require('./util');
+var storage = require('./storage');
 
-var MAX_LENGTH = 560;
-var MAX_COUNT = 720;
+var NUM_OPTIONS = [500, 1000, 1500, 2000, 2500, 3000];
+var curLength = parseInt(storage.get('maxNetworkRows'), 10) || 1500;
+var MAX_LENGTH = NUM_OPTIONS.indexOf(curLength) === -1 ? 1500 : curLength;
+var MAX_COUNT = MAX_LENGTH + 100;
 var WIN_NAME_PRE = '__whistle_' + location.href.replace(/\/[^/]*([#?].*)?$/, '/') + '__';
 
 function NetworkModal(list) {
@@ -10,6 +13,20 @@ function NetworkModal(list) {
 }
 
 NetworkModal.MAX_COUNT = MAX_COUNT;
+
+NetworkModal.setMaxRows = function(num) {
+  num = parseInt(num, 10);
+  if (NUM_OPTIONS.indexOf(num) !== -1) {
+    MAX_LENGTH = num;
+    MAX_COUNT = MAX_LENGTH + 100;
+    NetworkModal.MAX_COUNT = MAX_COUNT;
+    storage.set('maxNetworkRows', num);
+  }
+};
+
+NetworkModal.getMaxRows = function() {
+  return MAX_LENGTH;
+};
 
 var proto = NetworkModal.prototype;
 
@@ -25,8 +42,8 @@ var proto = NetworkModal.prototype;
 proto.search = function(keyword) {
   this._type = 'url';
   this._keyword = typeof keyword != 'string' ? '' : keyword.trim();
-  if (this._keyword && /^(url|u|content|c|b|body|headers|h|ip|i|status|result|s|r|method|m|type|t):(.*)$/.test(keyword)) {
-    this._type = RegExp.$1;
+  if (this._keyword && /^(url|u|content|c|b|body|headers|h|ip|i|status|result|s|r|method|m|mark|type|t):(.*)$/i.test(keyword)) {
+    this._type = RegExp.$1.toLowerCase();
     this._keyword = RegExp.$2.trim();
   }
   if (this._not = this._keyword[0] === '!') {
@@ -63,11 +80,25 @@ proto.setSortColumns = function(columns) {
 proto.checkNot = function(flag) {
   return this._not ? !flag : flag;
 };
+
+proto.hasUnmarked = function() {
+  var list = this._list;
+  for (var i = list.length - 1; i >= 0; --i) {
+    if (!list[i].mark) {
+      return true;
+    }
+  }
+};
+
 proto.filter = function(newList) {
   var self = this;
   var keyword = self._keyword;
   var list = self.list;
-  if (!keyword) {
+  if (self._type === 'mark') {
+    list.forEach(function(item) {
+      item.hide = !item.mark || self.checkNot(!self.checkKeywork(item.url));
+    });
+  } else if (!keyword) {
     list.forEach(function(item) {
       item.hide = false;
     });
@@ -121,7 +152,7 @@ proto.filter = function(newList) {
       break;
     default:
       list.forEach(function(item) {
-        item.hide = self.checkNot(!self.checkKeywork(item.url.toLowerCase()));
+        item.hide = self.checkNot(!self.checkKeywork(item.url));
       });
     }
   }
@@ -164,10 +195,11 @@ function compare(prev, next, order, name) {
 }
 
 function _compare(prev, next, name) {
+  var isNull = next == null || next == '';
   if (prev == null || prev == '') {
-    return -1;
+    return isNull ? 0 : -1;
   }
-  if (next == null || next == '') {
+  if (isNull) {
     return 1;
   }
   var isTime = 'dns,request,response,download,time'.indexOf(name) !== -1;
@@ -316,6 +348,33 @@ proto.removeUnselectedItems = function() {
   }
 
   if (hasUnselectedItem) {
+    this.update(false, true);
+    return true;
+  }
+};
+
+proto.removeUnmarkedItems = function() {
+  var hasUnmarkedItem;
+  var endIndex = -1;
+  var list = this._list;
+
+  for (var i = list.length - 1; i >= 0; i--) {
+    var item = list[i];
+    if (!item.mark) {
+      hasUnmarkedItem = true;
+      if (endIndex == -1) {
+        endIndex = i;
+      }
+      if (!i) {
+        list.splice(i, endIndex - i + 1);
+      }
+    } else if (endIndex != -1) {
+      list.splice(i + 1, endIndex - i);
+      endIndex = -1;
+    }
+  }
+
+  if (hasUnmarkedItem) {
     this.update(false, true);
     return true;
   }
@@ -472,25 +531,45 @@ proto.getSelectedList = function() {
   });
 };
 
-proto.setSelectedList = function(startId, endId, selectElem) {
-  if (!startId || !endId) {
-    return;
+function getPrevSelected(start, list) {
+  for (; start >= 0; start--) {
+    var item = list[start - 1];
+    if (!item || (!item.selected && !item.active)) {
+      return start;
+    }
   }
+  return start;
+}
 
-  var selected, item;
-  for (var i = 0, len = this.list.length; i < len; i++) {
-    item = this.list[i];
-    if (item.id == startId) {
-      selected = !selected;
+function getNextSelected(start, list) {
+  for (var len = list.length; start < len; start++) {
+    var item = list[start + 1];
+    if (!item || (!item.selected && !item.active)) {
+      return start;
+    }
+  }
+  return start;
+}
+
+proto.setSelectedList = function(start, end, selectElem) {
+  var list = this.list;
+  start = list.indexOf(start);
+  end = list.indexOf(end);
+  if (start > end) {
+    var temp = getNextSelected(start, list);
+    start = end;
+    end = temp;
+  } else {
+    start = getPrevSelected(start, list);
+  }
+  for (var i = 0, len = list.length; i < len; i++) {
+    var item = list[i];
+    if (i >= start && i <= end) {
       item.selected = true;
+      selectElem(item, true);
     } else {
-      item.selected = selected;
+      item.selected = false;
     }
-
-    if (item.id == endId) {
-      selected = !selected;
-    }
-    selectElem(item);
   }
 };
 

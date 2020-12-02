@@ -1,11 +1,18 @@
 'use strict';
 
 exports.__esModule = true;
-exports['default'] = undefined;
 
 var _objectWithoutProperties2 = require('babel-runtime/helpers/objectWithoutProperties');
 
 var _objectWithoutProperties3 = _interopRequireDefault(_objectWithoutProperties2);
+
+var _stringify = require('babel-runtime/core-js/json/stringify');
+
+var _stringify2 = _interopRequireDefault(_stringify);
+
+var _typeof2 = require('babel-runtime/helpers/typeof');
+
+var _typeof3 = _interopRequireDefault(_typeof2);
 
 var _classCallCheck2 = require('babel-runtime/helpers/classCallCheck');
 
@@ -27,11 +34,6 @@ var _keys = require('babel-runtime/core-js/object/keys');
 
 var _keys2 = _interopRequireDefault(_keys);
 
-var _class, _temp; // ES6 + inline style port of JSONViewer https://bitbucket.org/davevedder/react-json-viewer/
-// all credits and original code to the author
-// Dave Vedder <veddermatic@gmail.com> http://www.eskimospy.com/
-// port by Daniele Zannotti http://www.github.com/dzannotti <dzannotti@me.com>
-
 var _react = require('react');
 
 var _react2 = _interopRequireDefault(_react);
@@ -50,8 +52,19 @@ var _createStylingFromTheme2 = _interopRequireDefault(_createStylingFromTheme);
 
 var _reactBase16Styling = require('react-base16-styling');
 
+var _contextMenu = require('../../context-menu');
+
+var _contextMenu2 = _interopRequireDefault(_contextMenu);
+
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { 'default': obj }; }
 
+/* eslint-disable react/no-string-refs */
+// ES6 + inline style port of JSONViewer https://bitbucket.org/davevedder/react-json-viewer/
+// all credits and original code to the author
+// Dave Vedder <veddermatic@gmail.com> http://www.eskimospy.com/
+// port by Daniele Zannotti http://www.github.com/dzannotti <dzannotti@me.com>
+
+var contextMenuList = [{ name: 'Copy Key' }, { name: 'Copy Value' }, { name: 'Collapse Parent' }];
 var identity = function identity(value) {
   return value;
 };
@@ -103,8 +116,8 @@ function checkLegacyTheming(theme, props) {
     }
 
     deprecatedStylingMethods.forEach(function (name) {
-      console.error( // eslint-disable-line no-console
-      'Styling method "' + name + '" is deprecated, use "theme" property instead');
+      // eslint-disable-next-line no-console
+      console.error('Styling method "' + name + '" is deprecated, use "theme" property instead');
 
       theme[deprecatedStylingMethodsMap[name]] = function (_ref2) {
         for (var _len = arguments.length, args = Array(_len > 1 ? _len - 1 : 0), _key = 1; _key < _len; _key++) {
@@ -142,13 +155,44 @@ function getStateFromProps(props) {
   };
 }
 
-var JSONTree = (_temp = _class = function (_React$Component) {
+var JSONTree = function (_React$Component) {
   (0, _inherits3['default'])(JSONTree, _React$Component);
 
   function JSONTree(props) {
     (0, _classCallCheck3['default'])(this, JSONTree);
 
     var _this = (0, _possibleConstructorReturn3['default'])(this, _React$Component.call(this, props));
+
+    _this.onContextMenu = function (e) {
+      var target = (0, _contextMenu.$)(e.target).closest('label');
+      var keyPath = _contextMenu.util.parseJSON(target.attr('data-key-path'));
+      if (!Array.isArray(keyPath)) {
+        return;
+      }
+      var data = _this.props.data;
+      if (data) {
+        for (var i = keyPath.length - 2; i >= 0; i--) {
+          data = data && data[keyPath[i]];
+        }
+      }
+      var isRoot = keyPath.length === 1;
+      var ctxMenu = _contextMenu.util.getMenuPosition(e, 110, isRoot ? 60 : 90);
+      ctxMenu.list = contextMenuList;
+      ctxMenu.className = 'w-inspectors-ctx-menu';
+      contextMenuList[0].copyText = keyPath[0];
+      if (data && (typeof data === 'undefined' ? 'undefined' : (0, _typeof3['default'])(data)) === 'object' && !(data instanceof String)) {
+        try {
+          data = (0, _stringify2['default'])(data, null, '  ');
+        } catch (e) {} // eslint-disable-line
+      }
+      contextMenuList[1].copyText = data + '';
+      contextMenuList[2].onClick = function() {
+        target.closest('li').parent().closest('li').find('div:first').click();
+      };
+      contextMenuList[2].hide = isRoot;
+      _this.refs.contextMenu.show(ctxMenu); // eslint-disable-line
+      e.preventDefault();
+    };
 
     _this.state = getStateFromProps(props);
     return _this;
@@ -186,16 +230,19 @@ var JSONTree = (_temp = _class = function (_React$Component) {
 
     return _react2['default'].createElement(
       'ul',
-      styling('tree'),
+      (0, _extends3['default'])({}, styling('tree'), { onContextMenu: this.onContextMenu }),
       _react2['default'].createElement(_JSONNode2['default'], (0, _extends3['default'])({}, (0, _extends3['default'])({ postprocessValue: postprocessValue, hideRoot: hideRoot, styling: styling }, rest), {
         keyPath: hideRoot ? [] : keyPath,
         value: postprocessValue(value)
-      }))
+      })),
+      _react2['default'].createElement(_contextMenu2['default'], { ref: 'contextMenu' })
     );
   };
 
   return JSONTree;
-}(_react2['default'].Component), _class.propTypes = {
+}(_react2['default'].Component);
+
+JSONTree.propTypes = {
   data: _propTypes2['default'].oneOfType([_propTypes2['default'].array, _propTypes2['default'].object]).isRequired,
   hideRoot: _propTypes2['default'].bool,
   theme: _propTypes2['default'].oneOfType([_propTypes2['default'].object, _propTypes2['default'].string]),
@@ -203,7 +250,8 @@ var JSONTree = (_temp = _class = function (_React$Component) {
   keyPath: _propTypes2['default'].arrayOf(_propTypes2['default'].oneOfType([_propTypes2['default'].string, _propTypes2['default'].number])),
   postprocessValue: _propTypes2['default'].func,
   sortObjectKeys: _propTypes2['default'].oneOfType([_propTypes2['default'].func, _propTypes2['default'].bool])
-}, _class.defaultProps = {
+};
+JSONTree.defaultProps = {
   shouldExpandNode: expandRootNode,
   hideRoot: false,
   keyPath: ['root'],
@@ -214,5 +262,5 @@ var JSONTree = (_temp = _class = function (_React$Component) {
   isCustomNode: noCustomNode,
   collectionLimit: 50,
   invertTheme: true
-}, _temp);
+};
 exports['default'] = JSONTree;
